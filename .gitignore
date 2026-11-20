@@ -1,0 +1,13 @@
+node_modules/
+dist/
+*.local
+.env*
+!.env.example
+.dev.vars*
+firebase-debug.log*
+.wrangler/
+service-account*.json
+
+firestore-debug.log*
+
+/content/banco-curricular.json

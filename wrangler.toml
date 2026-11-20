@@ -1,0 +1,21 @@
+name = "pediaecoe-api"
+main = "worker/index.mjs"
+compatibility_date = "2026-01-01"
+workers_dev = true
+
+[vars]
+FIREBASE_PROJECT_ID = ""
+ALLOWED_ORIGINS = ""
+AI_ENABLED = "false"
+AI_MODEL = "@cf/meta/llama-3.1-8b-instruct"
+
+[ai]
+binding = "AI"
+
+[[durable_objects.bindings]]
+name = "LIMITS"
+class_name = "DailyLimits"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["DailyLimits"]

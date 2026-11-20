@@ -1,0 +1,17 @@
+export type Group = 'anamnesis' | 'exploracion' | 'paraclinicos' | 'razonamiento' | 'acciones' | 'cierre';
+export type Interaction = { id: string; group: Group; label: string; reply: string };
+export type CaseData = { title: string; category: string; scenario: string; opening: string; difficulty: 'Baja'|'Media'|'Alta'; status: 'draft'|'review'|'published'; interactions: Interaction[] };
+export type Rubric = { diagnosis: string; reference: string; criteria: {id: string; domain: number; points: number; tip: string}[]; critical: {id: string; tip: string}[] };
+export type Grade = {title: string; score: number; domains: number[]; feedback: {label:string; earned:boolean; tip:string}[]; critical: string[]; errors?: string[]; passed:boolean; diagnosis:string; reference:string};
+export const STATION_MS: number;
+export const PHASES: string[];
+export const DOMAINS: number[];
+export const GROUPS: Group[];
+export const SINGLE: Group[];
+export function validCase(data: unknown, rubric: unknown): boolean;
+export function validAnswers(data: CaseData, selections: unknown): boolean;
+export function validId(id: unknown): id is string;
+export function grade(data: CaseData, rubric: Rubric, selections: string[]): Grade;
+export function normalizeEmail(input: string): string | null;
+export function readInvitations(source: string): string[];
+export function structured(data: CaseData, question: string): string;

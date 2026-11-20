@@ -1,0 +1,483 @@
+[
+  {
+    "id": "demo-bronquiolitis",
+    "data": {
+      "title": "Lactante con dificultad respiratoria",
+      "category": "Urgencias respiratorias",
+      "difficulty": "Media",
+      "scenario": "Lactante de 9 meses con tos. Entrevista a su familiar, explora la respiración e indica la conducta inicial.",
+      "opening": "Desde hace dos días tiene mocos y tos. Hoy toma menos leche y respira más rápido.",
+      "status": "review",
+      "interactions": [
+        {
+          "id": "bf1bb96fdb65",
+          "group": "anamnesis",
+          "label": "Inicio de síntomas respiratorios",
+          "reply": "Primero tuvo congestión y al día siguiente empezó a toser."
+        },
+        {
+          "id": "6fe13eb4fa93",
+          "group": "anamnesis",
+          "label": "Tomas, pañales y episodios de apnea",
+          "reply": "Sigue orinando, aunque ha tomado menos. No he visto pausas al respirar."
+        },
+        {
+          "id": "5561118215ec",
+          "group": "exploracion",
+          "label": "Signos vitales",
+          "reply": "Frecuencia respiratoria 48 por minuto y saturación 96 % al aire ambiente."
+        },
+        {
+          "id": "606a533ae3ae",
+          "group": "exploracion",
+          "label": "Exploración respiratoria",
+          "reply": "Tiraje leve. Sibilancias difusas en ambos campos."
+        },
+        {
+          "id": "85972f2d5ce0",
+          "group": "exploracion",
+          "label": "Hidratación",
+          "reply": "Mucosa húmeda y llenado capilar menor de dos segundos."
+        },
+        {
+          "id": "8cab4fb1747e",
+          "group": "exploracion",
+          "label": "Estado general",
+          "reply": "Está alerta, llora al examen y se calma con su familiar."
+        },
+        {
+          "id": "3dc542dc578a",
+          "group": "paraclinicos",
+          "label": "Valorar radiografía de tórax",
+          "reply": "No hay indicación rutinaria de radiografía en este escenario típico."
+        },
+        {
+          "id": "b4978670f3d2",
+          "group": "razonamiento",
+          "label": "Aspiración súbita de cuerpo extraño",
+          "reply": ""
+        },
+        {
+          "id": "b98233076a8e",
+          "group": "razonamiento",
+          "label": "Neumonía bacteriana con consolidación focal",
+          "reply": ""
+        },
+        {
+          "id": "20470a640482",
+          "group": "razonamiento",
+          "label": "Bronquiolitis aguda de presentación típica",
+          "reply": ""
+        },
+        {
+          "id": "2d1a949a8ae6",
+          "group": "acciones",
+          "label": "Medidas de soporte y reevaluación clínica",
+          "reply": ""
+        },
+        {
+          "id": "37c7ac86d368",
+          "group": "acciones",
+          "label": "Iniciar antibióticos de rutina",
+          "reply": ""
+        },
+        {
+          "id": "31f35069211d",
+          "group": "acciones",
+          "label": "Dar alta sin valorar la tolerancia oral",
+          "reply": ""
+        },
+        {
+          "id": "3f160ecbc72a",
+          "group": "cierre",
+          "label": "Dar por finalizada la consulta sin pautas de alarma",
+          "reply": ""
+        },
+        {
+          "id": "50417a93cd06",
+          "group": "cierre",
+          "label": "Explicar signos de alarma y confirmar comprensión",
+          "reply": ""
+        },
+        {
+          "id": "a4ba19685d12",
+          "group": "cierre",
+          "label": "Indicar volver solo si aparece tos nocturna",
+          "reply": ""
+        }
+      ]
+    },
+    "rubric": {
+      "diagnosis": "Bronquiolitis aguda de presentación típica",
+      "reference": "NICE NG9. Bronchiolitis in children: diagnosis and management. https://www.nice.org.uk/guidance/ng9",
+      "criteria": [
+        {
+          "id": "bf1bb96fdb65",
+          "domain": 0,
+          "points": 10,
+          "tip": "Reconstruye la evolución antes de asignar un diagnóstico."
+        },
+        {
+          "id": "6fe13eb4fa93",
+          "domain": 0,
+          "points": 10,
+          "tip": "Valora tolerancia oral y signos de alarma."
+        },
+        {
+          "id": "5561118215ec",
+          "domain": 1,
+          "points": 10,
+          "tip": "Mide frecuencia respiratoria y saturación en contexto."
+        },
+        {
+          "id": "606a533ae3ae",
+          "domain": 1,
+          "points": 10,
+          "tip": "Busca trabajo respiratorio y asimetría de hallazgos."
+        },
+        {
+          "id": "20470a640482",
+          "domain": 2,
+          "points": 20,
+          "tip": "Correlaciona edad, pródromo viral y primer episodio de sibilancias."
+        },
+        {
+          "id": "2d1a949a8ae6",
+          "domain": 3,
+          "points": 25,
+          "tip": "Adapta la conducta a la hidratación y al trabajo respiratorio."
+        },
+        {
+          "id": "50417a93cd06",
+          "domain": 4,
+          "points": 15,
+          "tip": "Incluye apnea, dificultad respiratoria progresiva, cianosis o reducción importante de tomas."
+        }
+      ],
+      "critical": [
+        {
+          "id": "31f35069211d",
+          "tip": "Antes del alta, verifica la tolerancia oral y el riesgo de deterioro."
+        }
+      ]
+    }
+  },
+  {
+    "id": "demo-deshidratacion",
+    "data": {
+      "title": "Escolar con diarrea aguda",
+      "category": "Líquidos y electrolitos",
+      "difficulty": "Media",
+      "scenario": "Paciente de 5 años con diarrea líquida y vómito. Valora hidratación y propone un plan.",
+      "opening": "Desde ayer ha ido muchas veces al baño. Ha pedido agua más de lo normal.",
+      "status": "review",
+      "interactions": [
+        {
+          "id": "9325685f25de",
+          "group": "anamnesis",
+          "label": "Deposiciones, vómitos y tolerancia oral",
+          "reply": "Ha tenido seis deposiciones sin sangre. Vomitó dos veces y ahora toma sorbos."
+        },
+        {
+          "id": "fe7ddf8e3d8f",
+          "group": "anamnesis",
+          "label": "Diuresis y estado habitual",
+          "reply": "Ha orinado menos de lo habitual. Está despierta y conversa."
+        },
+        {
+          "id": "93e8be8ab15f",
+          "group": "exploracion",
+          "label": "Signos vitales",
+          "reply": "Presión arterial conservada, frecuencia cardiaca discretamente elevada, respiración sin esfuerzo."
+        },
+        {
+          "id": "1835c08f8133",
+          "group": "exploracion",
+          "label": "Perfusión y mucosas",
+          "reply": "Mucosa algo seca, pulsos presentes y llenado capilar de dos segundos."
+        },
+        {
+          "id": "ed5dbec95e5d",
+          "group": "exploracion",
+          "label": "Abdomen",
+          "reply": "Blando, sin defensa ni dolor focal."
+        },
+        {
+          "id": "474753f0f2a2",
+          "group": "paraclinicos",
+          "label": "Valorar electrolitos",
+          "reply": "En este escenario, la indicación depende de la evolución y del cuadro clínico."
+        },
+        {
+          "id": "59d0c4d6ccc7",
+          "group": "razonamiento",
+          "label": "Gastroenteritis aguda con deshidratación clínica sin choque",
+          "reply": ""
+        },
+        {
+          "id": "d6ef62d61ed3",
+          "group": "razonamiento",
+          "label": "Abdomen agudo quirúrgico con signos peritoneales",
+          "reply": ""
+        },
+        {
+          "id": "7e3fb9dc3b05",
+          "group": "razonamiento",
+          "label": "Choque hipovolémico descompensado",
+          "reply": ""
+        },
+        {
+          "id": "567f73dd8d76",
+          "group": "acciones",
+          "label": "Iniciar rehidratación oral y reevaluar",
+          "reply": ""
+        },
+        {
+          "id": "a62ea04ae428",
+          "group": "acciones",
+          "label": "Dar antibióticos a todo paciente con diarrea aguda",
+          "reply": ""
+        },
+        {
+          "id": "be53c42bc054",
+          "group": "acciones",
+          "label": "Suspender líquidos mientras dure la diarrea",
+          "reply": ""
+        },
+        {
+          "id": "58ac01db2102",
+          "group": "cierre",
+          "label": "Recomendar seguir en casa sin reevaluar el deterioro",
+          "reply": ""
+        },
+        {
+          "id": "cc48b11cfa4b",
+          "group": "cierre",
+          "label": "Indicar evitar toda alimentación varios días",
+          "reply": ""
+        },
+        {
+          "id": "9f70eab265f3",
+          "group": "cierre",
+          "label": "Acordar seguimiento y explicar signos de alarma",
+          "reply": ""
+        }
+      ]
+    },
+    "rubric": {
+      "diagnosis": "Gastroenteritis aguda con deshidratación clínica sin choque",
+      "reference": "NICE CG84. Diarrhoea and vomiting caused by gastroenteritis. https://www.nice.org.uk/guidance/cg84",
+      "criteria": [
+        {
+          "id": "9325685f25de",
+          "domain": 0,
+          "points": 10,
+          "tip": "Caracteriza pérdidas y capacidad de recibir líquidos."
+        },
+        {
+          "id": "fe7ddf8e3d8f",
+          "domain": 0,
+          "points": 10,
+          "tip": "La diuresis y el estado general ayudan a valorar la gravedad."
+        },
+        {
+          "id": "93e8be8ab15f",
+          "domain": 1,
+          "points": 10,
+          "tip": "Correlaciona los signos con el examen físico."
+        },
+        {
+          "id": "1835c08f8133",
+          "domain": 1,
+          "points": 10,
+          "tip": "Busca datos de hipoperfusión y deshidratación."
+        },
+        {
+          "id": "59d0c4d6ccc7",
+          "domain": 2,
+          "points": 20,
+          "tip": "Justifica la clasificación con el estado general, la diuresis y la perfusión."
+        },
+        {
+          "id": "567f73dd8d76",
+          "domain": 3,
+          "points": 25,
+          "tip": "Ofrece solución de rehidratación oral en tomas frecuentes y comprueba tolerancia."
+        },
+        {
+          "id": "9f70eab265f3",
+          "domain": 4,
+          "points": 15,
+          "tip": "Aclara cuándo consultar por incapacidad para beber, empeoramiento u orina muy escasa."
+        }
+      ],
+      "critical": [
+        {
+          "id": "be53c42bc054",
+          "tip": "Retirar líquidos expone a progresión de la deshidratación."
+        }
+      ]
+    }
+  },
+  {
+    "id": "demo-convulsion-febril",
+    "data": {
+      "title": "Preescolar con episodio convulsivo y fiebre",
+      "category": "Urgencias neurológicas",
+      "difficulty": "Alta",
+      "scenario": "Paciente de 2 años con fiebre. Llega alerta tras un episodio de movimientos generalizados descrito por su familiar.",
+      "opening": "Estaba caliente y de repente se puso rígida y tembló. Ya volvió a hablar conmigo.",
+      "status": "review",
+      "interactions": [
+        {
+          "id": "3611e1699a42",
+          "group": "anamnesis",
+          "label": "Duración, distribución y recurrencia",
+          "reply": "Duró unos dos minutos. Se movía todo el cuerpo y solo ocurrió una vez."
+        },
+        {
+          "id": "f746b64cc843",
+          "group": "anamnesis",
+          "label": "Recuperación y episodios previos",
+          "reply": "Volvió a su comportamiento habitual. Nunca le había pasado antes."
+        },
+        {
+          "id": "01ebc63f77a2",
+          "group": "exploracion",
+          "label": "Signos vitales",
+          "reply": "Temperatura 38,7 °C. Respiración y perfusión conservadas."
+        },
+        {
+          "id": "1f4b82b359c2",
+          "group": "exploracion",
+          "label": "Evaluación neurológica",
+          "reply": "Alerta, mueve las cuatro extremidades y no hay signos meníngeos en esta exploración."
+        },
+        {
+          "id": "a51bfd06d927",
+          "group": "exploracion",
+          "label": "Otorrinolaringología",
+          "reply": "Congestión nasal leve, sin hallazgos óticos sugestivos de otitis aguda."
+        },
+        {
+          "id": "ee05fbe6e34b",
+          "group": "paraclinicos",
+          "label": "Valorar neuroimagen",
+          "reply": "Valora la indicación según la recuperación, la focalidad y los hallazgos del examen."
+        },
+        {
+          "id": "5c233087d6aa",
+          "group": "razonamiento",
+          "label": "Crisis focal afebril confirmada",
+          "reply": ""
+        },
+        {
+          "id": "5f14036629da",
+          "group": "razonamiento",
+          "label": "Convulsión febril simple probable",
+          "reply": ""
+        },
+        {
+          "id": "69c1b095c6e7",
+          "group": "razonamiento",
+          "label": "Estatus epiléptico activo",
+          "reply": ""
+        },
+        {
+          "id": "045e386e02ac",
+          "group": "acciones",
+          "label": "Evaluar la causa de la fiebre y observar la recuperación",
+          "reply": ""
+        },
+        {
+          "id": "eefeb30f7585",
+          "group": "acciones",
+          "label": "Dar alta si persiste la alteración de conciencia",
+          "reply": ""
+        },
+        {
+          "id": "f00695ae9bd7",
+          "group": "acciones",
+          "label": "Iniciar tratamiento anticonvulsivo de mantenimiento sistemático",
+          "reply": ""
+        },
+        {
+          "id": "f41b4acf0da1",
+          "group": "cierre",
+          "label": "Indicar sujetar con fuerza las extremidades",
+          "reply": ""
+        },
+        {
+          "id": "d3360b3a796f",
+          "group": "cierre",
+          "label": "Pedir al familiar que introduzca objetos en la boca",
+          "reply": ""
+        },
+        {
+          "id": "92f01efecac6",
+          "group": "cierre",
+          "label": "Explicar primeros auxilios y cuándo buscar atención urgente",
+          "reply": ""
+        }
+      ]
+    },
+    "rubric": {
+      "diagnosis": "Convulsión febril simple probable",
+      "reference": "Royal Children’s Hospital Melbourne. Febrile seizure. https://www.rch.org.au/clinicalguide/guideline_index/Febrile_seizure/",
+      "criteria": [
+        {
+          "id": "3611e1699a42",
+          "domain": 0,
+          "points": 10,
+          "tip": "Busca duración, focalidad y recurrencia."
+        },
+        {
+          "id": "f746b64cc843",
+          "domain": 0,
+          "points": 10,
+          "tip": "Confirma retorno a su estado neurológico basal."
+        },
+        {
+          "id": "01ebc63f77a2",
+          "domain": 1,
+          "points": 10,
+          "tip": "Confirma estabilidad y mide la temperatura."
+        },
+        {
+          "id": "1f4b82b359c2",
+          "domain": 1,
+          "points": 10,
+          "tip": "Busca focalidad o alteración persistente del estado mental."
+        },
+        {
+          "id": "5f14036629da",
+          "domain": 2,
+          "points": 20,
+          "tip": "Comprueba que haya sido breve, generalizada y única, con recuperación completa."
+        },
+        {
+          "id": "045e386e02ac",
+          "domain": 3,
+          "points": 25,
+          "tip": "Busca el foco y reevalúa signos de infección grave."
+        },
+        {
+          "id": "92f01efecac6",
+          "domain": 4,
+          "points": 15,
+          "tip": "Indica proteger de golpes, colocar de lado si es seguro y evitar introducir objetos en la boca."
+        }
+      ],
+      "critical": [
+        {
+          "id": "eefeb30f7585",
+          "tip": "Una recuperación incompleta requiere evaluación urgente."
+        },
+        {
+          "id": "d3360b3a796f",
+          "tip": "No se debe introducir ningún objeto durante una crisis."
+        }
+      ]
+    }
+  }
+]

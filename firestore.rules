@@ -1,0 +1,60 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function google() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email is string
+        && request.auth.token.firebase.sign_in_provider == 'google.com';
+    }
+    function email() { return request.auth.token.email.lower(); }
+    function invitation() {
+      return get(/databases/$(database)/documents/authorized_emails/$(email()));
+    }
+    function active() { return google() && invitation().data.active == true; }
+    function admin() {
+      return active() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    function own(uid) { return active() && request.auth.uid == uid; }
+    function ownsRecord() { return active() && resource.data.uid == request.auth.uid; }
+    function profile() {
+      let data = request.resource.data;
+      return data.keys().hasOnly(['email', 'name', 'photo', 'createdAt'])
+        && data.email == email()
+        && data.name is string && data.name.size() <= 120
+        && data.photo is string && data.photo.size() <= 2048
+        && (data.photo == '' || data.photo.matches('https://[^ ]+'));
+    }
+    match /authorized_emails/{address} {
+      allow get: if (google() && email() == address) || admin();
+      allow list: if admin();
+      allow create, update: if admin()
+        && address.matches('[a-z0-9.!#$%&\'+=?^_`{|}~-]+@[a-z0-9.-]+[.][a-z]{2,}')
+        && address.size() <= 254
+        && request.resource.data.keys().hasOnly(['active'])
+        && request.resource.data.active is bool
+        && (address != email() || request.resource.data.active == true);
+      allow delete: if admin() && address != email();
+    }
+    match /admins/{uid} {
+      allow get: if own(uid);
+    }
+    match /users/{uid} {
+      allow get: if own(uid) || admin();
+      allow list: if admin();
+      allow create: if own(uid) && profile() && request.resource.data.createdAt == request.time;
+      allow update: if own(uid) && profile() && request.resource.data.createdAt == resource.data.createdAt;
+    }
+    match /case_bank/{id} {
+      allow read: if admin() || (active() && resource.data.status == 'published');
+      allow write: if admin();
+    }
+    match /case_rubrics/{id} { allow read, write: if admin(); }
+    match /simulation_sessions/{id} { allow read: if ownsRecord() || admin(); }
+    match /station_results/{id} { allow read: if ownsRecord() || admin(); }
+    match /student_progress/{uid} {
+      allow get: if own(uid) || admin();
+      allow list: if admin();
+    }
+  }
+}

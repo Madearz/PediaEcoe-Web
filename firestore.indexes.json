@@ -1,0 +1,12 @@
+{
+  "indexes": [
+    {"collectionGroup":"simulation_sessions","queryScope":"COLLECTION","fields":[{"fieldPath":"uid","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]},
+    {"collectionGroup":"station_results","queryScope":"COLLECTION","fields":[{"fieldPath":"uid","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]}
+  ],
+  "fieldOverrides": [
+    {"collectionGroup":"case_rubrics","fieldPath":"criteria","indexes":[]},
+    {"collectionGroup":"case_bank","fieldPath":"interactions","indexes":[]},
+    {"collectionGroup":"private_sessions","fieldPath":"cases","indexes":[]},
+    {"collectionGroup":"station_results","fieldPath":"feedback","indexes":[]}
+  ]
+}
