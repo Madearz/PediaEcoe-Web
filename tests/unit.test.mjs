@@ -3,7 +3,8 @@ import { test } from 'node:test';
 import { generateKeyPair, SignJWT } from 'jose';
 import { ApiError, verifyGoogleToken } from '../worker/firebase.mjs';
 import { createHandler } from '../worker/index.mjs';
-import { grade, readInvitations, validAnswers, validCase } from '../shared/clinical.mjs';
+import { grade, readInvitations, structured, validAnswers, validCase } from '../shared/clinical.mjs';
+import { socialReply } from '../shared/dialogue.mjs';
 import { readFile } from 'node:fs/promises';
 
 const bearer = { Authorization: 'Bearer a.b.c', 'Content-Type': 'application/json' };
@@ -46,6 +47,29 @@ test('verifica firma, proyecto, expiración y proveedor Google con llaves de pru
   }
 });
 
+test('el familiar reconoce la presentación y responde con los datos del caso cuando hay una pregunta', () => {
+  const currentCase = {
+    opening: 'Lo traje porque tiene tos.',
+    interactions: [
+      { group: 'anamnesis', label: 'Inicio de la tos', reply: 'Empezó anoche.' },
+      { group: 'anamnesis', label: 'Alimentación', reply: 'Ha tomado menos leche.' },
+    ],
+  };
+  assert.equal(socialReply('Buenos días, soy la doctora Lina, ¿puedo hacerle unas preguntas?'),
+    'Mucho gusto. Sí, claro. Puede preguntarme.');
+  assert.match(socialReply('¿Está bien si lo reviso?'), /puede revisarlo/);
+  assert.match(socialReply('¿Cómo está?'), /Gracias por preguntar/);
+  assert.equal(socialReply('¿Puedo tomar una muestra?'), null);
+  assert.equal(socialReply('Hola, soy la doctora Lina, ¿fue al jardín?'), null);
+  assert.equal(structured(currentCase, 'Hola, soy la doctora Lina, ¿qué le trae hoy?'),
+    'Mucho gusto. Lo traje porque tiene tos.');
+  assert.equal(structured(currentCase, 'Hola, soy la doctora Lina, ¿desde cuándo tiene tos?'),
+    'Mucho gusto. Empezó anoche.');
+  assert.equal(structured(currentCase, '¿Y hace cuánto?', [{ question: '¿Tiene tos?', reply: 'Hace años.' }]),
+    'Empezó anoche.');
+  assert.match(structured(currentCase, '¿Tiene alergia a la leche?'), /No sabría confirmarle/);
+});
+
 test('Worker bloquea IA para cuenta anónima, sin invitación, revocada o circuito ajeno', async () => {
   let invitation = 'missing';
   let uid = 'other';
@@ -62,14 +86,19 @@ test('Worker bloquea IA para cuenta anónima, sin invitación, revocada o circui
   const env = { AI_ENABLED: 'true', AI: { run: async () => { providerCalls++; return { response: 'Respuesta de prueba del proveedor.' }; } },
     LIMITS: { getByName: () => ({ fetch: async () => new Response(null, { status: 204 }) }) } };
   const path = '/circuits/circuit-id/dialogue';
+  const introduction = { question: 'Hola, soy la doctora Lina. ¿Puedo hacerle unas preguntas?' };
   assert.equal((await app(new Request('https://worker.example' + path), env)).status, 401);
   assert.equal((await app(call(path, { question: '¿Desde cuándo?' }), env)).status, 403);
+  assert.equal((await app(call(path, introduction), env)).status, 403);
   invitation = 'suspended';
   assert.equal((await app(call(path, { question: '¿Desde cuándo?' }), env)).status, 403);
   invitation = 'active';
   assert.equal((await app(call(path, { question: '¿Desde cuándo?' }), env)).status, 404);
   assert.equal(providerCalls, 0);
   uid = 'student';
+  assert.deepEqual(await (await app(call(path, introduction), env)).json(),
+    { mode: 'structured', reply: 'Mucho gusto. Sí, claro. Puede preguntarme.' });
+  assert.equal(providerCalls, 0);
   assert.equal((await (await app(call(path, { question: '¿Desde cuándo?' }), env)).json()).mode, 'ai');
   invitation = 'suspended';
   assert.equal((await app(call(path, { question: '¿Desde cuándo?' }), env)).status, 403);
@@ -77,6 +106,10 @@ test('Worker bloquea IA para cuenta anónima, sin invitación, revocada o circui
   invitation = 'active';
   assert.equal((await (await app(call(path, { question: '¿Desde cuándo?' }), { ...env, AI_ENABLED: 'false' })).json()).mode, 'structured');
   assert.equal(providerCalls, 1);
+  const generic = { ...env, AI: { run: async () => ({ response: 'No tengo ese dato.' }) } };
+  const question = { question: '¿Qué le trae hoy?' };
+  assert.deepEqual(await (await app(call(path, question), generic)).json(),
+    { mode: 'structured', reply: example[0].data.opening });
 });
 
 test('Worker rechaza puntajes del navegador, calcula y guarda con precondiciones', async () => {

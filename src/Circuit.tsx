@@ -112,7 +112,7 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
     } catch (failure) {
       signal.throwIfAborted();
       if (failure instanceof RequestError && [401, 403, 409].includes(failure.status)) throw failure;
-      answer = { mode: 'structured', reply: structured(station, question) };
+      answer = { mode: 'structured', reply: structured(station, question, history) };
     }
     signal.throwIfAborted();
     addTurn({ question, ...answer });

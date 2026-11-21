@@ -14,4 +14,4 @@ export function validId(id: unknown): id is string;
 export function grade(data: CaseData, rubric: Rubric, selections: string[]): Grade;
 export function normalizeEmail(input: string): string | null;
 export function readInvitations(source: string): string[];
-export function structured(data: CaseData, question: string): string;
+export { structured } from './dialogue.mjs';

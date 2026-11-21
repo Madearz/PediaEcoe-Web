@@ -98,14 +98,4 @@ export function readInvitations(source) {
   return [...emails];
 }
 
-export function structured(currentCase, question) {
-  const normalize = (text) => text.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
-  const ignored = new Set(['tiene', 'desde', 'sobre', 'cuando', 'donde', 'como', 'usted', 'puede']);
-  const words = normalize(question).match(/[a-z]{4,}/g) ?? [];
-  const candidates = currentCase.interactions.filter((item) => item.group === 'anamnesis');
-  const scored = candidates.map((item) => ({ item, count: words.filter((word) =>
-    !ignored.has(word) && normalize(item.label).includes(word)).length }));
-  scored.sort((left, right) => right.count - left.count);
-  return scored[0]?.count ? scored[0].item.reply : 'No tengo ese dato. Puedes usar las preguntas de anamnesis disponibles en este caso.';
-}
-
+export { structured } from './dialogue.mjs';
