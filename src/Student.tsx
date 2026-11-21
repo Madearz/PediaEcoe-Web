@@ -5,6 +5,7 @@ import type { User } from 'firebase/auth';
 import { collection, doc, getDocFromServer, getDocsFromServer, limit, orderBy, query, startAfter, where,
   type DocumentData, type QueryDocumentSnapshot } from 'firebase/firestore';
 import { db, messageOf } from './firebase';
+import { ReviewChat } from './ReviewChat';
 import { Avatar } from './App';
 import { DOMAINS, PHASES, type CaseData, type Grade } from '../shared/clinical.mjs';
 
@@ -47,6 +48,15 @@ export function Cases() {
 type GradeRecord = Grade & { createdAt?: { toDate(): Date }; id: string; station: number };
 type Progress = { stations: number; circuits: number; totalScore: number };
 
+function HistoryResult({ user, result }: { user: User; result: GradeRecord }) {
+  const [open, setOpen] = useState(false);
+  return <details className="card" onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <summary><span><strong>{result.title}</strong><small>Estación {result.station + 1} · {resultDate(result.createdAt)}</small></span>
+      <b className="pill">{result.score}/100</b></summary>
+    {open && <><ReviewChat resultId={result.id} user={user} result={result}/><GradeDetail result={result}/></>}
+  </details>;
+}
+
 export function GradeDetail({ result }: { result: Grade }) {
   return <div className="grade-detail">
     <div className="domain-grid">{PHASES.map((phase, index) => <div key={phase}><strong>{result.domains[index]}/{DOMAINS[index]}</strong><span>{phase}</span></div>)}</div>
@@ -88,10 +98,7 @@ export function History({ user }: { user: User }) {
       <div className="card"><strong>{progress.stations}</strong>Estaciones evaluadas</div>
       <div className="card"><strong>{progress.stations ? (progress.totalScore / progress.stations).toFixed(1) : 0}/100</strong>Puntaje promedio</div></div>}
     {!loading && !error && !results.length && <p className="card">Completa una estación para ver tu primera evaluación aquí.</p>}
-    <div className="result-list">{results.map((result) => <details className="card" key={result.id}>
-      <summary><span><strong>{result.title}</strong><small>Estación {result.station + 1} · {resultDate(result.createdAt)}</small></span>
-        <b className="pill">{result.score}/100</b></summary><GradeDetail result={result}/>
-    </details>)}</div>
+    <div className="result-list">{results.map((result) => <HistoryResult key={result.id} user={user} result={result}/>)}</div>
     {loading && <p role="status">Cargando resultados…</p>}
     {cursor && <button className="button secondary" disabled={loading} onClick={() => void load(cursor)}>Cargar más resultados</button>}
   </main>;

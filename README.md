@@ -116,6 +116,10 @@ Durante una estación, pulsa **Iniciar llamada** y concede permiso al micrófono
 
 El micrófono y la voz dependen del soporte de Web Speech en el navegador. Puedes ver la transcripción durante la estación. Con Workers AI, se envían la pregunta y hasta dos turnos recientes como texto para contextualizar la respuesta. La aplicación no sube archivos de audio ni guarda la conversación en Firestore. Si la IA está apagada, no responde o agota su cuota, se leen las respuestas estructuradas del caso. La lista de criterios evaluables sigue disponible en **Anamnesis**.
 
+## Chat de revisión
+
+Tras finalizar una estación, abre **Chat de revisión** para preguntar por las decisiones incorrectas, los criterios omitidos, el diagnóstico esperado o los puntos por fase. También está disponible al abrir un intento en **Mis resultados**. El tutor consulta el resultado guardado y, cuando existe, la ficha de esa estación. Los mensajes del chat son temporales y la nota se conserva tal como se calculó al entregar la estación.
+
 ## Archivos principales
 
 | Archivo o carpeta | Uso |

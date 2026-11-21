@@ -2,7 +2,7 @@ export type Group = 'anamnesis' | 'exploracion' | 'paraclinicos' | 'razonamiento
 export type Interaction = { id: string; group: Group; label: string; reply: string };
 export type CaseData = { title: string; category: string; scenario: string; opening: string; difficulty: 'Baja'|'Media'|'Alta'; status: 'draft'|'review'|'published'; interactions: Interaction[] };
 export type Rubric = { diagnosis: string; reference: string; criteria: {id: string; domain: number; points: number; tip: string}[]; critical: {id: string; tip: string}[] };
-export type Grade = {title: string; score: number; domains: number[]; feedback: {label:string; earned:boolean; tip:string}[]; critical: string[]; errors?: string[]; passed:boolean; diagnosis:string; reference:string};
+export type Grade = {title: string; score: number; domains: number[]; feedback: {label:string; earned:boolean; tip:string; domain?:number}[]; critical: string[]; errors?: string[]; passed:boolean; diagnosis:string; reference:string};
 export const STATION_MS: number;
 export const PHASES: string[];
 export const DOMAINS: number[];

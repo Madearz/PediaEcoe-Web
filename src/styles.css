@@ -198,3 +198,20 @@ textarea { resize: vertical; }
 }
 
 .brand-original { max-width: min(100%, 205px); max-height: 108px; object-fit: contain; }
+
+.review-chat { display: grid; gap: .75rem; margin: 1rem 0; border: 1px solid #e7dff8; background: #faf8ff; border-radius: 16px; padding: 1rem; }
+.review-chat h3 { display: flex; align-items: center; gap: .5rem; color: #492ab7; margin: 0; }
+.review-chat > p { margin: 0; }
+.review-suggestions { display: flex; gap: .4rem; flex-wrap: wrap; }
+.review-suggestions .button { min-height: 2.15rem; padding: .38rem .65rem; font-size: .82rem; }
+.review-log { display: grid; gap: .65rem; max-height: 24rem; overflow-y: auto; overscroll-behavior: contain; }
+.review-log:empty { display: none; }
+.review-turn { display: grid; gap: .45rem; }
+.review-turn p { margin: 0; }
+.review-answer, .review-student { border-radius: 12px; padding: .65rem .85rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.review-turn strong { display: block; font-size: .78rem; color: #4d37a0; margin-bottom: .2rem; }
+.review-answer { background: white; border: 1px solid #e9e1f8; }
+.review-student { background: #eee7ff; justify-self: end; max-width: 90%; }
+.review-form { display: flex; gap: .45rem; }
+.review-form input { min-width: 0; flex: 1; }
+.review-form .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

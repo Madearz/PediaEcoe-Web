@@ -64,7 +64,7 @@ export function grade(data, rubric, selections) {
   const feedback = rubric.criteria.map((item) => {
     const earned = selected.has(item.id);
     if (earned) domains[item.domain] += item.points;
-    return { label: data.interactions.find((interaction) => interaction.id === item.id).label, earned, tip: item.tip };
+    return { label: data.interactions.find((interaction) => interaction.id === item.id).label, earned, tip: item.tip, domain: item.domain };
   });
   const critical = rubric.critical.filter((item) => selected.has(item.id)).map((item) => item.tip);
   const score = domains.reduce((total, value) => total + value, 0);

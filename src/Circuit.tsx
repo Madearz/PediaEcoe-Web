@@ -5,6 +5,7 @@ import { collection, doc, getDocFromServer, getDocsFromServer, orderBy, query, w
 import type { User } from 'firebase/auth';
 import { apiReady, call, messageOf, RequestError } from './firebase';
 import { database, GradeDetail } from './Student';
+import { ReviewChat } from './ReviewChat';
 import { scene } from './App';
 import { canListen, canSpeak, listenForQuestion, playSpeech, speak, useVoice } from './voice';
 import { createVoiceCall, type CallPhase, type CallState } from './voice-call';
@@ -222,7 +223,7 @@ function BriefIcon() { return <span className="clinical-icon"><HeartPulse size={
 export function Circuit({ user }: { user: User }) {
   const [active, setActive] = useState<Session | null>(null);
   const [recent, setRecent] = useState<Existing[]>([]);
-  const [result, setResult] = useState<Grade | null>(null);
+  const [result, setResult] = useState<{ id: string; grade: Grade } | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(true);
   const navigate = useNavigate();
@@ -235,7 +236,7 @@ export function Circuit({ user }: { user: User }) {
     setActive(data);
     if (!data.deadline && data.index > 0) {
       const record = await getDocFromServer(doc(database, 'station_results', sessionId + '-' + (data.index - 1)));
-      if (current() && record.exists()) setResult(record.data() as Grade);
+      if (current() && record.exists()) setResult({ id: record.id, grade: record.data() as Grade });
     }
   }, [user]);
   useEffect(() => {
@@ -282,8 +283,8 @@ export function Circuit({ user }: { user: User }) {
       <button className="button primary" disabled={!apiReady || busy} onClick={() => void act('new')}>Iniciar circuito</button>
       {!apiReady && <p role="status">El Worker requiere configuración.</p>}</section>}
     {id && !busy && !active && <><button className="button secondary" onClick={() => void act('refresh')}>Volver a cargar el circuito</button> <Link to="/simulador">Regresar al simulador</Link></>}
-    {active && !busy && <section className="card"><h2>{result ? result.title + ' · ' + result.score + '/100' : 'Progreso del circuito'}</h2>
-      {result && <GradeDetail result={result}/>}
+    {active && !busy && <section className="card"><h2>{result ? result.grade.title + ' · ' + result.grade.score + '/100' : 'Progreso del circuito'}</h2>
+      {result && <><ReviewChat key={result.id} resultId={result.id} user={user} result={result.grade}/><GradeDetail result={result.grade}/></>}
       {active.complete ? <Link className="button primary" to="/resultados">Ver historial</Link> :
         <button className="button primary" onClick={() => void act('next')}>Iniciar estación {active.index + 1}</button>}</section>}
   </main>;

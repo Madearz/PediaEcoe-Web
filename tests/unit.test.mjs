@@ -224,3 +224,59 @@ test('el historial de la llamada es acotado y solo corresponde a la estación ac
     pregunta: '¿Y desde cuándo?',
   });
 });
+
+test('el repaso distingue decisiones incorrectas de criterios omitidos y sirve con notas antiguas', async () => {
+  const { reviewFacts, reviewReply } = await import('../shared/review.mjs');
+  const { data, rubric } = example[0];
+  const expected = rubric.criteria.find((criterion) => criterion.domain === 3);
+  const wrong = data.interactions.find((item) => item.group === 'acciones' && item.id !== expected.id);
+  const score = grade(data, rubric, [wrong.id]);
+  const facts = reviewFacts(score, { public: data, rubric });
+  const explanation = reviewReply(facts, '¿Qué hice mal?');
+  assert.ok(explanation.includes(wrong.label));
+  assert.ok(explanation.includes(facts.decisions[0].expected.label));
+  assert.ok(reviewReply(facts, '¿Qué me faltó?').includes(score.feedback[0].label));
+  assert.ok(reviewReply(facts, '¿Por qué ese diagnóstico?').includes(score.diagnosis));
+  const priorQuestion = { question: '¿Cómo se calculó mi puntaje?', reply: '' };
+  assert.ok(reviewReply(facts, '¿Y por qué?', [priorQuestion]).includes(score.score + '/100'));
+  const older = { ...score, errors: undefined, feedback: score.feedback.map(({ domain, ...item }) => item) };
+  assert.match(reviewReply(reviewFacts(older), '¿Qué hice mal?'), /acciones.*sin registrar/);
+});
+
+test('el chat de revisión protege resultados ajenos y excluye puntajes enviados por el cliente', async () => {
+  const sample = example[0];
+  const result = grade(sample.data, sample.rubric, []);
+  let owner = 'other';
+  let allowed = true;
+  let aiCalls = 0;
+  let prompt;
+  const db = { async get(path) {
+    if (path.startsWith('authorized_emails/')) return { data: { active: allowed } };
+    if (path.startsWith('station_results/')) return { data: { ...result, uid: owner, sessionId: 'circuit-id', station: 0 } };
+    return { data: { cases: [{ public: sample.data, rubric: sample.rubric }] } };
+  } };
+  const app = createHandler({ verify: async () => ({ uid: 'student', email: 'student@example.com' }), database: () => db });
+  const env = { AI_ENABLED: 'true', AI: { async run(_model, input) {
+    aiCalls++; prompt = input.messages[0].content; return { response: 'Repasemos las omisiones.' };
+  } }, LIMITS: { getByName: () => ({ fetch: async () => new Response(null, { status: 204 }) }) } };
+  const path = '/reviews/circuit-id-0';
+  const body = { question: '¿Qué me faltó?' };
+
+  assert.equal((await app(call(path, body), env)).status, 404);
+  assert.equal((await app(new Request('https://worker.example' + path, { method: 'POST' }), env)).status, 401);
+  owner = 'student';
+  assert.equal((await app(call(path, { ...body, score: 100 }), env)).status, 400);
+  allowed = false;
+  assert.equal((await app(call(path, body), env)).status, 403);
+  assert.equal(aiCalls, 0);
+
+  allowed = true;
+  const answer = await app(call(path, body), env);
+  assert.deepEqual(await answer.json(), { mode: 'ai', reply: 'Repasemos las omisiones.' });
+  assert.equal(aiCalls, 1);
+  assert.ok(prompt.includes(result.diagnosis));
+  assert.ok(prompt.includes('"score":0'));
+  assert.ok(!prompt.includes('student@example.com'));
+  const fallback = await app(call(path, body), { ...env, AI_ENABLED: 'false' });
+  assert.equal((await fallback.json()).mode, 'structured');
+});
