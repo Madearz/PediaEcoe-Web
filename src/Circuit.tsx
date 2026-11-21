@@ -1,18 +1,23 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { Activity, Brain, ClipboardList, Clock3, FileText, HeartPulse, Mic, MicOff, Send, Stethoscope, Volume2, VolumeX } from 'lucide-react';
+import { Activity, Brain, ClipboardList, Clock3, FileText, HeartPulse, Mic, MicOff, Phone, PhoneOff, Send, Stethoscope, Volume2, VolumeX } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { collection, doc, getDocFromServer, getDocsFromServer, orderBy, query, where, limit } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { apiReady, call, messageOf, RequestError } from './firebase';
 import { database, GradeDetail } from './Student';
 import { scene } from './App';
-import { canSpeak, speak, useVoice } from './voice';
+import { canListen, canSpeak, listenForQuestion, playSpeech, speak, useVoice } from './voice';
+import { createVoiceCall, type CallPhase, type CallState } from './voice-call';
 import { PHASES, SINGLE, STATION_MS, structured, type CaseData, type Grade, type Group, type Interaction } from '../shared/clinical.mjs';
 
 type Session = { id: string; index: number; complete: boolean; case: CaseData | null; titles: string[]; deadline: number | null; serverNow: number };
 type Turn = { question: string; reply: string; mode: 'structured'|'ai' };
 type Existing = { id: string; index: number; complete: boolean };
 const phases: Group[][] = [['anamnesis'], ['exploracion', 'paraclinicos'], ['razonamiento'], ['acciones'], ['cierre']];
+const callLabels: Record<CallPhase, string> = {
+  idle: '', listening: 'Te escucha. Habla ahora.', thinking: 'El familiar está preparando su respuesta…',
+  speaking: 'El familiar está hablando…', paused: 'Micrófono en pausa.',
+};
 const labels: Record<Group, string> = { anamnesis: 'Preguntas de anamnesis', exploracion: 'Exploración física',
   paraclinicos: 'Paraclínicos', razonamiento: 'Decisión diagnóstica', acciones: 'Conducta inicial', cierre: 'Comunicación y cierre' };
 
@@ -30,6 +35,8 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
   const [tab, setTab] = useState(false);
   const [finding, setFinding] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
+  const transcript = useRef<Turn[]>([]);
+  const textRequest = useRef<AbortController | null>(null);
   const [text, setText] = useState('');
   const [audio, setAudio] = useState(false);
   const [error, setError] = useState('');
@@ -38,10 +45,30 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
   const submitting = useRef(false);
   const expired = useRef(false);
   const voice = useVoice(setText);
+  const stopDictation = voice.stop;
   const latest = turns.at(-1);
+  const [callState, setCallState] = useState<CallState>({ phase: 'idle', muted: false });
+  const callActive = callState.phase !== 'idle';
+  const voiceAnswer = useRef<(question: string, signal: AbortSignal) => Promise<string>>(requestAnswer);
+  voiceAnswer.current = requestAnswer;
+  const [voiceCall] = useState(() => createVoiceCall({
+    listen: listenForQuestion,
+    answer: (question, signal) => voiceAnswer.current(question, signal),
+    say: playSpeech,
+    change: setCallState,
+  }));
+  useEffect(() => () => {
+    voiceCall.stop();
+    textRequest.current?.abort();
+    if (canSpeak) window.speechSynthesis.cancel();
+  }, [voiceCall]);
   const submit = useCallback(async () => {
     if (submitting.current) return;
     submitting.current = true;
+    voiceCall.stop();
+    stopDictation();
+    textRequest.current?.abort();
+    if (canSpeak) window.speechSynthesis.cancel();
     setSaving(true);
     setError('');
     try {
@@ -50,7 +77,7 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
       onSaved(resultId);
     } catch (failure) { setError(messageOf(failure)); }
     finally { submitting.current = false; setSaving(false); }
-  }, [onSaved, selected, session.id, session.index, storageKey, user]);
+  }, [onSaved, selected, session.id, session.index, stopDictation, storageKey, user, voiceCall]);
   useEffect(() => {
     const baseline = performance.now();
     const tick = () => setTime(Math.max(0, deadline - session.serverNow - (performance.now() - baseline)));
@@ -59,8 +86,8 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
     return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', tick); };
   }, [deadline, session.serverNow]);
   useEffect(() => {
-    if (time <= 0 && !expired.current) { expired.current = true; voice.stop(); void submit(); }
-  }, [time, submit, voice.stop]);
+    if (time <= 0 && !expired.current) { expired.current = true; void submit(); }
+  }, [time, submit]);
   function choose(item: Interaction) {
     if (time <= 0 || saving) return;
     const previous = SINGLE.includes(item.group) ? selected.filter((id) => station.interactions.find((option) => option.id === id)?.group !== item.group) : selected;
@@ -69,30 +96,52 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
     try { sessionStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* Progress can still be submitted. */ }
     if (!item.reply) return;
     if (item.group !== 'anamnesis') { setFinding(item.reply); return; }
-    setTurns((current) => [...current.slice(-29), { question: item.label, reply: item.reply, mode: 'structured' }]);
-    if (audio) speak(item.reply);
+    addTurn({ question: item.label, reply: item.reply, mode: 'structured' });
+    if (audio && !callActive && !voice.listening) speak(item.reply);
+  }
+  function addTurn(turn: Turn) {
+    transcript.current = [...transcript.current.slice(-29), turn];
+    setTurns(transcript.current);
+  }
+  async function requestAnswer(question: string, signal: AbortSignal) {
+    const history = transcript.current.slice(-2).map((turn) => ({ question: turn.question, reply: turn.reply.slice(0, 400) }));
+    let answer: Omit<Turn, 'question'>;
+    try {
+      answer = await call(user, '/circuits/' + session.id + '/dialogue', { question, history, index: session.index }, signal);
+    } catch (failure) {
+      signal.throwIfAborted();
+      if (failure instanceof RequestError && [401, 403, 409].includes(failure.status)) throw failure;
+      answer = { mode: 'structured', reply: structured(station, question) };
+    }
+    signal.throwIfAborted();
+    addTurn({ question, ...answer });
+    return answer.reply;
   }
   async function ask(event: FormEvent) {
     event.preventDefault();
     const question = text.trim();
-    if (!question || sending || saving || !time) return;
+    if (!question || textRequest.current || saving || !time || callActive || voice.listening) return;
+    const request = new AbortController();
+    textRequest.current = request;
     setSending(true);
     setError('');
     try {
-      const answer = await call<Omit<Turn, 'question'>>(user, '/circuits/' + session.id + '/dialogue', { question });
-      setText('');
-      setTurns((current) => [...current.slice(-29), { question, ...answer }]);
-      if (audio) speak(answer.reply);
+      const reply = await requestAnswer(question, request.signal);
+      setText((previous) => previous.trim() === question ? '' : previous);
+      if (audio) speak(reply);
     } catch (failure) {
-      if (failure instanceof RequestError && [401, 403, 409].includes(failure.status)) {
-        setError(messageOf(failure));
-      } else {
-        const reply = structured(station, question);
-        setText('');
-        setTurns((current) => [...current.slice(-29), { question, reply, mode: 'structured' }]);
-        if (audio) speak(reply);
-      }
-    } finally { setSending(false); }
+      if (!request.signal.aborted) setError(messageOf(failure));
+    } finally {
+      if (textRequest.current === request) { textRequest.current = null; setSending(false); }
+    }
+  }
+  function toggleCall() {
+    if (callActive) { voiceCall.stop(); return; }
+    if (!canListen || !canSpeak || !time || saving || textRequest.current) return;
+    stopDictation();
+    window.speechSynthesis.cancel();
+    setError('');
+    voiceCall.start();
   }
   const totalSeconds = Math.ceil(time / 1000);
   const clock = [Math.floor(totalSeconds / 60), totalSeconds % 60].map((value) => String(value).padStart(2, '0')).join(':');
@@ -115,16 +164,37 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
         </div>
         <div className="dialogue">
           <div className="voice-row">
-            <button className="icon-button" disabled={!canSpeak} title={audio ? 'Silenciar' : 'Activar voz'} aria-label={audio ? 'Silenciar voz' : 'Activar voz'} aria-pressed={audio}
+            <button type="button" className={`button call-button ${callActive ? 'call-end' : 'primary'}`}
+              disabled={!canListen || !canSpeak || !time || sending || saving} onClick={toggleCall}>
+              {callActive ? <><PhoneOff size={19}/> Colgar</> : <><Phone size={19}/> Iniciar llamada</>}
+            </button>
+            {callActive && <button type="button" className="button secondary" aria-pressed={callState.muted} onClick={voiceCall.toggleMute}>
+              {callState.muted ? <><MicOff size={18}/> Reanudar micrófono</> : <><Mic size={18}/> Silenciar micrófono</>}
+            </button>}
+            <button type="button" className="icon-button" disabled={!canSpeak || callActive || voice.listening}
+              title={audio ? 'Silenciar respuestas escritas' : 'Escuchar respuestas escritas'} aria-label={audio ? 'Silenciar respuestas escritas' : 'Escuchar respuestas escritas'} aria-pressed={audio}
               onClick={() => { setAudio(!audio); if (audio) window.speechSynthesis.cancel(); else speak(latest?.reply ?? station.opening); }}>{audio ? <Volume2/> : <VolumeX/>}</button>
-            <button className="mic" disabled={!voice.available || !time} title="Micrófono" aria-label={voice.listening ? 'Desactivar micrófono' : 'Activar micrófono'} aria-pressed={voice.listening} onClick={voice.toggle}>{voice.listening ? <MicOff/> : <Mic/>}</button>
-            <button className="button secondary transcript" aria-expanded={tab} onClick={() => setTab(!tab)}><FileText size={17}/> Conversación</button>
+            <button type="button" className="button secondary transcript" aria-expanded={tab} onClick={() => setTab(!tab)}><FileText size={17}/> Conversación</button>
           </div>
-          {voice.voiceError && <p className="error" role="alert">{voice.voiceError}</p>}
-          {voice.listening && <p role="status">Escuchando…</p>}
-          {!voice.available && <small>Micrófono no disponible en este navegador.</small>}
-          <form className="ask" onSubmit={ask}><input aria-label="Pregunta al familiar" placeholder="Escribe una pregunta al familiar ficticio…" maxLength={400} value={text} onChange={(event) => setText(event.target.value)}/>
-            <button className="button primary" aria-label="Enviar pregunta" disabled={!time || sending || !text.trim()}><Send size={18}/></button></form>
+          {callActive && <p className="call-status" data-phase={callState.phase} role="status">
+            <span aria-hidden="true"/>{callLabels[callState.phase]}
+          </p>}
+          {callState.error && <p className="error" role="alert">{callState.error}</p>}
+          {voice.voiceError && !callActive && <p className="error" role="alert">{voice.voiceError}</p>}
+          {voice.listening && <p role="status">Dictando…</p>}
+          {!canListen || !canSpeak ? <small>La llamada requiere micrófono y reproducción de voz compatibles. Puedes escribir tu pregunta.</small>
+            : callActive && <small>Las preguntas por voz quedan en la conversación. Usa Anamnesis para registrar los criterios evaluables.</small>}
+          <form className="ask" onSubmit={ask}>
+            {voice.available && <button type="button" className="icon-button" aria-label={voice.listening ? 'Detener dictado' : 'Dictar en el campo de texto'}
+              title={voice.listening ? 'Detener dictado' : 'Dictar en el campo de texto'} aria-pressed={voice.listening}
+              disabled={!time || callActive || sending || saving}
+              onClick={() => { if (canSpeak && !voice.listening) window.speechSynthesis.cancel(); voice.toggle(); }}>
+              {voice.listening ? <MicOff size={18}/> : <Mic size={18}/>}
+            </button>}
+            <input aria-label="Pregunta al familiar" placeholder={callActive ? 'Cuelga para enviar una pregunta escrita' : 'Escribe una pregunta al familiar ficticio…'}
+              maxLength={400} value={text} onChange={(event) => setText(event.target.value)}/>
+            <button className="button primary" aria-label="Enviar pregunta" disabled={!time || callActive || voice.listening || sending || saving || !text.trim()}><Send size={18}/></button>
+          </form>
           {tab && <div className="transcript-list">{!turns.length ? <span>Aún no has hecho preguntas.</span> : turns.map((turn, index) => <div key={index}><b>{turn.question}</b><p>{turn.reply}</p><small>{turn.mode === 'ai' ? 'IA generativa' : 'Respuesta estructurada'}</small></div>)}</div>}
         </div>
       </section>

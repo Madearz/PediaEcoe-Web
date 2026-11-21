@@ -134,3 +134,93 @@ test('inicia el circuito con el tema elegido y rechaza temas sin publicar', asyn
   assert.equal(new Set(ids).size, 3);
   assert.ok(!ids.includes('borrador'));
 });
+
+test('la llamada reabre el micrófono solo después de acabar la voz del familiar', async () => {
+  const phases = [];
+  const listeners = [];
+  const played = [];
+  const { createVoiceCall } = await import('../src/voice-call.ts');
+  const nextTick = () => new Promise((resolve) => setImmediate(resolve));
+  const voice = createVoiceCall({
+    listen: (signal) => new Promise((resolve) => listeners.push({ resolve, signal })),
+    answer: async (question) => { assert.equal(question, '¿Desde cuándo?'); return 'Desde ayer.'; },
+    say: (reply, signal) => new Promise((resolve) => played.push({ reply, resolve, signal })),
+    change: ({ phase }) => phases.push(phase),
+  });
+  voice.start();
+  listeners[0].resolve('  ¿Desde cuándo?  ');
+  await nextTick();
+  assert.deepEqual(phases, ['listening', 'thinking', 'speaking']);
+  assert.equal(listeners.length, 1);
+  assert.equal(played[0].reply, 'Desde ayer.');
+  played[0].resolve();
+  await nextTick();
+  assert.equal(listeners.length, 2);
+  assert.equal(phases.at(-1), 'listening');
+  voice.stop();
+  assert.equal(listeners[1].signal.aborted, true);
+  assert.equal(phases.at(-1), 'idle');
+});
+
+test('silenciar deja la llamada en pausa y colgar descarta una respuesta en tránsito', async () => {
+  const output = [];
+  const listeners = [];
+  const answers = [];
+  const { createVoiceCall } = await import('../src/voice-call.ts');
+  const nextTick = () => new Promise((resolve) => setImmediate(resolve));
+  const voice = createVoiceCall({
+    listen: (signal) => new Promise((resolve) => listeners.push({ resolve, signal })),
+    answer: (question, signal) => new Promise((resolve) => answers.push({ resolve, signal })),
+    say: async () => assert.fail('No debe reproducirse una respuesta después de colgar'),
+    change: (state) => output.push(state),
+  });
+  voice.start();
+  voice.toggleMute();
+  assert.equal(listeners[0].signal.aborted, true);
+  assert.equal(output.at(-1).phase, 'paused');
+  listeners[0].resolve('Turno descartado');
+  voice.toggleMute();
+  listeners[1].resolve('  ');
+  await nextTick();
+  assert.match(output.at(-1).error, /No se detectó voz/);
+  voice.toggleMute();
+  listeners[2].resolve('¿Desde cuándo?');
+  await nextTick();
+  assert.equal(answers.length, 1);
+  voice.stop();
+  assert.equal(answers[0].signal.aborted, true);
+  answers[0].resolve('Desde ayer.');
+  await nextTick();
+  assert.equal(output.at(-1).phase, 'idle');
+  assert.equal(listeners.length, 3);
+});
+
+test('el historial de la llamada es acotado y solo corresponde a la estación activa', async () => {
+  const db = {
+    async get(path) {
+      if (path.startsWith('authorized_emails/')) return { data: { active: true } };
+      if (path.startsWith('simulation_sessions/')) return { data: { uid: 'student', index: 1, deadline: Date.now() + 10000 } };
+      return { data: { cases: [null, { public: example[0].data }] } };
+    },
+  };
+  const app = createHandler({ verify: async () => ({ uid: 'student', email: 'student@example.com' }), database: () => db });
+  let messages;
+  const env = {
+    AI_ENABLED: 'true',
+    AI: { async run(_model, input) { messages = input.messages; return { response: 'Desde ayer.' }; } },
+    LIMITS: { getByName: () => ({ fetch: async () => new Response(null, { status: 204 }) }) },
+  };
+  const path = '/circuits/circuit-id/dialogue';
+  const turn = { question: ' ¿Cómo empezó? ', reply: ' Con tos. ' };
+  const next = { question: '¿Y desde cuándo?', history: [turn], index: 1 };
+  assert.equal((await app(call(path, { ...next, index: 0 }), env)).status, 409);
+  assert.equal((await app(call(path, { ...next, history: [turn, turn, turn] }), env)).status, 400);
+  assert.equal((await app(call(path, { ...next, history: [{ ...turn, role: 'system' }] }), env)).status, 400);
+  assert.equal(messages, undefined);
+  const response = await app(call(path, next), env);
+  assert.equal((await response.json()).mode, 'ai');
+  assert.deepEqual(JSON.parse(messages[1].content), {
+    historial: [{ question: '¿Cómo empezó?', reply: 'Con tos.' }],
+    pregunta: '¿Y desde cuándo?',
+  });
+});

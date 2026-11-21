@@ -127,8 +127,13 @@ button svg, a svg, label svg { flex: 0 0 auto; }
 .subtitle small { display: block; margin-top: .23rem; color: #ded7ff; font-size: .71rem; }
 .dialogue { display: grid; gap: .55rem; padding: .75rem; text-align: center; }
 .voice-row { display: flex; gap: .55rem; justify-content: center; align-items: center; flex-wrap: wrap; }
-.mic { display: grid; place-items: center; border-radius: 50%; color: white; background: linear-gradient(145deg, #a46be6,#6246d8); border: 3px solid #d8c5fd; box-shadow: 0 3px 10px #6749b54f; width: 59px; height: 59px; }
-.mic[aria-pressed='true'] { background: #a92d58; }
+.call-button { min-width: 9.5rem; }
+.call-end { color: white; background: #a22450; border-color: #a22450; }
+.call-end:hover { background: #851d43; }
+.call-status { display: inline-flex; gap: .45rem; align-items: center; justify-content: center; min-height: 1.35rem; font-weight: 600; }
+.call-status > span { width: .48rem; height: .48rem; border-radius: 50%; background: #7756c8; }
+.call-status[data-phase='listening'] > span { background: #137457; }
+.call-status[data-phase='paused'] > span { background: #925c08; }
 .ask { display: flex; gap: .5rem; width: min(100%, 620px); margin: auto; }
 input, textarea, select { width: 100%; min-height: 43px; border-radius: 10px; background: white; border: 1px solid #dcd7f0; color: var(--ink); padding: .55rem .6rem; }
 textarea { resize: vertical; }

@@ -25,13 +25,14 @@ export async function signIn() {
 export class RequestError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
-export async function call<T>(user: User, path: string, body?: object): Promise<T> {
+export async function call<T>(user: User, path: string, body?: object, signal?: AbortSignal): Promise<T> {
   if (!api) throw new RequestError('El servicio de simulación aún no está configurado.', 503);
+  const timeout = AbortSignal.timeout(14000);
   const response = await fetch(api + path, {
     method: body === undefined ? 'GET' : 'POST',
     headers: { Authorization: 'Bearer ' + await user.getIdToken(), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
     body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(14000),
+    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
   });
   const data = await response.json().catch(() => null);
   if (!response.ok || !data) throw new RequestError(data?.error ?? 'El servicio no está disponible.', response.status);
