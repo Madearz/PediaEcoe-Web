@@ -4,12 +4,13 @@ import type { User } from 'firebase/auth';
 import { collection, count, doc, deleteDoc, getAggregateFromServer, getDocFromServer, getDocsFromServer, limit, orderBy,
   query, runTransaction, setDoc, sum, writeBatch } from 'firebase/firestore';
 import { database } from './Student';
-import { messageOf } from './firebase';
-import { GROUPS, normalizeEmail, readInvitations, validCase, validId, type CaseData, type Rubric } from '../shared/clinical.mjs';
+import { call, messageOf } from './firebase';
+import { DAILY_CIRCUITS_DEFAULT, DAILY_CIRCUITS_MAX, GROUPS, normalizeEmail, readInvitations, validCase, validId, type CaseData, type Rubric } from '../shared/clinical.mjs';
 
 const emptyCase: CaseData = { title: '', category: '', difficulty: 'Media', scenario: '', opening: '', status: 'draft', interactions: [] };
 const emptyRubric: Rubric = { diagnosis: '', reference: '', criteria: [], critical: [] };
 type Invitation = { email: string; active: boolean };
+type CircuitLimit = { email: string; dailyLimit: number };
 type CaseItem = { id: string; title: string; status: CaseData['status'] };
 type Stat = { students: number; submitted: number; circuits: number; total: number };
 const statuses = { draft: 'Borrador', review: 'En revisión médica', published: 'Publicado' };
@@ -32,12 +33,22 @@ function Invitations({ user }: { user: User }) {
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [pendingDelete, setPendingDelete] = useState('');
+  const [circuitLimits, setCircuitLimits] = useState<Record<string, number> | null>(null);
+  const [limitError, setLimitError] = useState('');
+  const [editingLimit, setEditingLimit] = useState<{ email: string; value: string } | null>(null);
   const addresses = collection(database, 'authorized_emails');
   async function refresh() {
     const snapshot = await getDocsFromServer(query(addresses, limit(1000)));
     setRows(snapshot.docs.map((item) => ({ email: item.id, active: item.data().active === true })));
   }
   useEffect(() => { void refresh().catch((failure) => setError(messageOf(failure))).finally(() => setBusy(false)); }, []);
+  useEffect(() => {
+    const request = new AbortController();
+    void call<CircuitLimit[]>(user, '/admin/circuit-limits', undefined, request.signal)
+      .then((items) => setCircuitLimits(Object.fromEntries(items.map(({ email, dailyLimit }) => [email, dailyLimit]))))
+      .catch((failure) => { if (!request.signal.aborted) setLimitError(messageOf(failure)); });
+    return () => request.abort();
+  }, [user]);
   async function mutate(operation: () => Promise<string>) {
     setBusy(true);
     setNotice('');
@@ -78,6 +89,19 @@ function Invitations({ user }: { user: User }) {
       return `Invitaciones nuevas: ${added}. Ya registradas: ${list.length - added}.`;
     });
   }
+  async function saveLimit(event: FormEvent, editor: { email: string; value: string }) {
+    event.preventDefault();
+    setBusy(true);
+    setNotice('');
+    setError('');
+    try {
+      const saved = await call<CircuitLimit>(user, '/admin/circuit-limits', { email: editor.email, dailyLimit: Number(editor.value) });
+      setCircuitLimits((previous) => ({ ...previous, [saved.email]: saved.dailyLimit }));
+      setEditingLimit(null);
+      setNotice(`Cupo guardado para ${saved.email}. Puede iniciar hasta ${saved.dailyLimit} circuitos al día.`);
+    } catch (failure) { setError(messageOf(failure)); }
+    finally { setBusy(false); }
+  }
   return <section className="card admin-section"><h2><Users size={21}/> Correos autorizados</h2>
     <form onSubmit={add} className="inline-form"><label>Correo de Google<input type="email" required maxLength={254} value={email} onChange={(event) => setEmail(event.target.value)} placeholder="estudiante@universidad.edu"/></label>
       <button className="button primary" disabled={busy}><Plus size={17}/> Autorizar</button>
@@ -85,10 +109,22 @@ function Invitations({ user }: { user: User }) {
         onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) upload(file); }}/></label>
     </form>
     <p>El CSV debe tener una columna de correos y puede incluir el encabezado «correo».</p>
+    {limitError && <p className="notice error" role="alert">No se pudieron cargar los cupos. {limitError}</p>}
     {notice && <p className="notice" role="status">{notice}</p>}{error && <p className="notice error" role="alert">{error}</p>}
     <ul className="admin-list">{rows.map((item) => {
       const own = item.email === user.email?.toLowerCase();
-      return <li key={item.email}><span><b>{item.email}</b><small>{own ? 'Tu cuenta · ' : ''}{item.active ? 'Autorizada' : 'Suspendida'}</small></span>
+      const dailyLimit = circuitLimits?.[item.email] ?? DAILY_CIRCUITS_DEFAULT;
+      const editor = editingLimit?.email === item.email ? editingLimit : null;
+      return <li key={item.email}><span><b>{item.email}</b><small>{own ? 'Tu cuenta · ' : ''}{item.active ? 'Autorizada' : 'Suspendida'}
+        {circuitLimits && ` · ${dailyLimit} circuitos al día`}</small></span>
+        {circuitLimits && (editor ? <form className="circuit-limit-form" onSubmit={(event) => void saveLimit(event, editor)}>
+          <label>Circuitos al día<input type="number" min={DAILY_CIRCUITS_DEFAULT} max={DAILY_CIRCUITS_MAX} step={1} required
+            aria-label={`Circuitos al día para ${item.email}`} value={editor.value} disabled={busy}
+            onChange={(event) => setEditingLimit({ ...editor, value: event.target.value })}/></label>
+          <button className="button primary" disabled={busy}>Guardar</button>
+          <button type="button" className="button secondary" disabled={busy} onClick={() => setEditingLimit(null)}>Cancelar</button>
+        </form> : <button type="button" className="button secondary" disabled={busy}
+          aria-label={`Cambiar cupo de ${item.email}`} onClick={() => setEditingLimit({ email: item.email, value: String(dailyLimit) })}>Cambiar cupo</button>)}
         {!own && (pendingDelete === item.email ? <div><button className="button danger" disabled={busy} onClick={() => void mutate(async () => {
           await deleteDoc(doc(addresses, item.email)); setPendingDelete(''); return 'Invitación eliminada.';
         })}>Confirmar eliminación</button><button className="button secondary" onClick={() => setPendingDelete('')}>Cancelar</button></div> :

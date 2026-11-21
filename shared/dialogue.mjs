@@ -10,9 +10,8 @@ const timingQuestion = /\b(desde cuando|hace cuanto|cuando (empezo|comenzo|inici
 const timingFact = /\b(inicio|evolucion|duracion|primero|horas|dias|semanas|ayer|empezo|comenzo)\b/;
 const medicationQuestion = /\b(medicamentos?|medicina|jarabe|tratamiento|remedio)\b/;
 const allergyQuestion = /\b(alergia|alergico|alergica|alergias)\b/;
-const backgroundQuestion = /\b(?:(?:sufre|padece) de algo|(?:sufre|padece|tiene|ha tenido|le han diagnosticado) (?:de )?alguna enfermedad|(?:tiene |hay )?(?:algun |alguna )antecedentes?)\b/;
-const specificHistory = /\b(?:familiar(?:es)?|familia|prenatal(?:es)?|embarazo|hoy|anoche)\b/;
-const backgroundFact = /\b(?:antecedentes? (?:personales?|medicos?|patologicos?)|comorbilidades?|enfermedades? (?:cronicas?|previas?|de base))\b/;
+const backgroundQuestion = /\b(?:(?:sufre|padece) de algo(?: mas)?|(?:sufre|padece|tiene|ha tenido|le han diagnosticado) (?:de )?alguna enfermedad(?: de base| cronica| previa)?|(?:algun |alguna )antecedentes?(?: (?:personal|medico|patologico)s?)?)(?: doctor| doctora| senor| senora)?$/;
+const backgroundFact = /\b(?:antecedentes? (?:personales?|medicos?|patologicos?|renales?|cardiacos?|respiratorios?)|comorbilidades?|enfermedades? (?:cronicas?|previas?|de base))\b/;
 const subjects = [
   [/\b(fiebre|temperatura|caliente)\b/, /\b(fiebre|temperatura|caliente|febril)\b/],
   [/\b(tos|tose|toser|tosiendo)\b/, /\b(tos|tose|toser|tosiendo)\b/],
@@ -90,7 +89,17 @@ function social(question) {
 
 export function socialReply(question) { return social(question).only || null; }
 
+export function patientBackgroundReply(currentCase, question) {
+  if (!backgroundQuestion.test(normalize(question))) return null;
+  const fact = currentCase.interactions.find(({ group, label, reply }) => group === 'anamnesis' && reply
+    && (backgroundFact.test(normalize(label)) || backgroundFact.test(normalize(reply))));
+  const reply = fact?.reply ?? 'No que yo sepa. ¿Se refiere a alguna enfermedad en particular?';
+  return [social(question).prefix, reply].filter(Boolean).join(' ');
+}
+
 export function structured(currentCase, question, history = []) {
+  const background = patientBackgroundReply(currentCase, question);
+  if (background) return background;
   const socialTurn = social(question);
   if (socialTurn.only) return socialTurn.only;
   const text = normalize(question);
@@ -111,10 +120,6 @@ export function structured(currentCase, question, history = []) {
   if (!reply && openQuestion.test(text)) reply = currentCase.opening;
   const age = ageQuestion.test(text) ? patientAge(currentCase) : undefined;
   if (!reply && age) reply = `Tiene ${age}.`;
-  if (!reply && backgroundQuestion.test(text) && !specificHistory.test(text) && !allergyQuestion.test(text) && !medicationQuestion.test(text)) {
-    const background = facts.find(({ label, reply }) => backgroundFact.test(normalize(label)) || backgroundFact.test(normalize(reply)));
-    reply = background?.reply ?? 'No que yo sepa. ¿Se refiere a alguna enfermedad en particular?';
-  }
   reply ||= findFact(facts, text)?.reply;
   if (!reply && allergyQuestion.test(text)) reply = 'No sabría confirmarle si tiene alguna alergia. ¿Se refiere a algún medicamento o alimento en particular?';
   if (!reply && medicationQuestion.test(text)) reply = 'No recuerdo ese detalle con seguridad. ¿Me pregunta por algo que le dieron antes o por lo que recibió hoy?';

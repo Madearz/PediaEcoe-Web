@@ -1,4 +1,6 @@
 export const STATION_MS = 5 * 60 * 1000;
+export const DAILY_CIRCUITS_DEFAULT = 5;
+export const DAILY_CIRCUITS_MAX = 50;
 export const PHASES = ['Anamnesis', 'Examen físico', 'Razonamiento', 'Tratamiento', 'Cierre'];
 export const DOMAINS = [20, 20, 20, 25, 15];
 export const GROUPS = ['anamnesis', 'exploracion', 'paraclinicos', 'razonamiento', 'acciones', 'cierre'];

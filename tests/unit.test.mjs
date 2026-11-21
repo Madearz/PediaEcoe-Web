@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { DatabaseSync } from 'node:sqlite';
 import { generateKeyPair, SignJWT } from 'jose';
 import { ApiError, verifyGoogleToken } from '../worker/firebase.mjs';
-import { createHandler } from '../worker/index.mjs';
+import { createHandler, DailyLimits } from '../worker/index.mjs';
 import { grade, readInvitations, structured, validAnswers, validCase } from '../shared/clinical.mjs';
 import { PATIENT_HISTORY_LIMIT, socialReply } from '../shared/dialogue.mjs';
 import { readFile } from 'node:fs/promises';
@@ -115,6 +116,8 @@ test('Worker bloquea IA para cuenta anónima, sin invitación, revocada o circui
   uid = 'student';
   assert.deepEqual(await (await app(call(path, introduction), env)).json(),
     { mode: 'structured', reply: 'Mucho gusto. Sí, claro. Puede preguntarme.' });
+  assert.deepEqual(await (await app(call(path, { question: '¿Sufre de algo?' }), env)).json(),
+    { mode: 'structured', reply: 'No que yo sepa. ¿Se refiere a alguna enfermedad en particular?' });
   assert.equal(providerCalls, 0);
   assert.equal((await (await app(call(path, { question: '¿Desde cuándo?' }), env)).json()).mode, 'ai');
   invitation = 'suspended';
@@ -183,6 +186,57 @@ test('inicia el circuito con el tema elegido y rechaza temas sin publicar', asyn
   assert.equal(ids.length, 3);
   assert.equal(new Set(ids).size, 3);
   assert.ok(!ids.includes('borrador'));
+});
+
+test('solo administración puede elevar el cupo por correo y el cambio conserva el consumo del día', async () => {
+  const sqlite = new DatabaseSync(':memory:');
+  try {
+    const sql = { exec(query, ...params) {
+      const statement = sqlite.prepare(query);
+      if (query.startsWith('SELECT')) return { toArray: () => statement.all(...params) };
+      return statement.run(...params);
+    } };
+    const durable = new DailyLimits({ storage: { sql, transactionSync: (operation) => operation() } });
+    const env = { LIMITS: { getByName: () => ({ fetch: (url, options) => durable.fetch(new Request(url, options)) }) } };
+    const invitees = ['student@example.com', 'other@example.com', 'admin@example.com'];
+    let identity = { uid: 'student', email: invitees[0] };
+    const db = { async get(path, _privileged, missing = 404) {
+      if (path === 'admins/admin') return { data: {} };
+      if (invitees.some((email) => path === 'authorized_emails/' + email)) return { data: { active: true } };
+      throw new ApiError(missing, 'No autorizado.');
+    } };
+    const app = createHandler({ verify: async () => identity, database: () => db });
+    const path = '/admin/circuit-limits';
+    const spendFor = (uid, email) => durable.fetch(new Request('https://limits.internal', {
+      method: 'POST', body: JSON.stringify({ action: 'start', uid, email }),
+    }));
+    assert.equal((await app(call(path), env)).status, 403);
+    assert.equal((await app(call(path, { email: invitees[0], dailyLimit: 7 }), env)).status, 403);
+    for (let count = 0; count < 5; count++) assert.equal((await spendFor('student', invitees[0])).status, 204);
+    assert.equal((await spendFor('student', invitees[0])).status, 429);
+
+    identity = { uid: 'admin', email: invitees[2] };
+    for (const dailyLimit of [0, 51, 5.5, '7']) {
+      assert.equal((await app(call(path, { email: invitees[0], dailyLimit }), env)).status, 400);
+    }
+    assert.equal((await app(call(path, { email: 'absent@example.com', dailyLimit: 7 }), env)).status, 404);
+    assert.deepEqual(await (await app(call(path, { email: 'STUDENT@EXAMPLE.COM', dailyLimit: 7 }), env)).json(),
+      { email: invitees[0], dailyLimit: 7 });
+    assert.deepEqual(await (await app(call(path), env)).json(), [{ email: invitees[0], dailyLimit: 7 }]);
+    assert.equal((await spendFor('student', invitees[0])).status, 204);
+    assert.equal((await spendFor('student', invitees[0])).status, 204);
+    assert.equal((await spendFor('student', invitees[0])).status, 429);
+    for (let count = 0; count < 5; count++) assert.equal((await spendFor('other', invitees[1])).status, 204);
+    assert.equal((await spendFor('other', invitees[1])).status, 429);
+    assert.equal((await app(call(path, { email: invitees[0], dailyLimit: 5 }), env)).status, 200);
+    assert.deepEqual(await (await app(call(path), env)).json(), []);
+    assert.equal((await spendFor('student', invitees[0])).status, 429);
+    assert.equal((await app(call(path, { email: invitees[2], dailyLimit: 20 }), env)).status, 200);
+    sqlite.exec("UPDATE counters SET value = 350 WHERE id = 'all:start'");
+    assert.equal((await spendFor('admin', invitees[2])).status, 429);
+  } finally {
+    sqlite.close();
+  }
 });
 
 test('la llamada reabre el micrófono solo después de acabar la voz del familiar', async () => {

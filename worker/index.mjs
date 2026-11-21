@@ -1,23 +1,42 @@
 import { ApiError, firestore, verifyGoogleToken } from './firebase.mjs';
-import { grade, normalizeEmail, STATION_MS, structured, validAnswers, validCase, validId } from '../shared/clinical.mjs';
-import { PATIENT_HISTORY_LIMIT, patientAge, socialReply } from '../shared/dialogue.mjs';
+import { DAILY_CIRCUITS_DEFAULT, DAILY_CIRCUITS_MAX, grade, normalizeEmail, STATION_MS, structured, validAnswers, validCase, validId } from '../shared/clinical.mjs';
+import { PATIENT_HISTORY_LIMIT, patientAge, patientBackgroundReply, socialReply } from '../shared/dialogue.mjs';
 import { reviewFacts, reviewReply } from '../shared/review.mjs';
 
-const limits = { start: [5, 350], dialogue: [24, 800], messages: [40, 2000] };
+const limits = { start: [DAILY_CIRCUITS_DEFAULT, 350], dialogue: [24, 800], messages: [40, 2000] };
+const validCircuitLimit = (value) => Number.isInteger(value) && value >= DAILY_CIRCUITS_DEFAULT && value <= DAILY_CIRCUITS_MAX;
 
 export class DailyLimits {
   constructor(state) {
     this.storage = state.storage;
     this.sql = state.storage.sql;
     this.sql.exec('CREATE TABLE IF NOT EXISTS counters (id TEXT PRIMARY KEY, day TEXT, value INTEGER)');
+    this.sql.exec('CREATE TABLE IF NOT EXISTS circuit_limits (email TEXT PRIMARY KEY, daily_limit INTEGER NOT NULL)');
   }
 
   async fetch(request) {
-    const { action, uid } = await request.json();
-    if (!Object.hasOwn(limits, action) || typeof uid !== 'string') return new Response(null, { status: 400 });
-    const [perUser, global] = limits[action];
+    if (new URL(request.url).pathname === '/circuit-limits') {
+      if (request.method === 'GET') return Response.json(this.sql.exec('SELECT email, daily_limit AS dailyLimit FROM circuit_limits').toArray());
+      const { email, dailyLimit } = await request.json();
+      if (typeof email !== 'string' || normalizeEmail(email) !== email || !validCircuitLimit(dailyLimit)) return new Response(null, { status: 400 });
+      if (dailyLimit === DAILY_CIRCUITS_DEFAULT) {
+        this.sql.exec('DELETE FROM circuit_limits WHERE email = ?', email);
+      } else {
+        this.sql.exec('INSERT INTO circuit_limits (email, daily_limit) VALUES (?, ?) ON CONFLICT(email) DO UPDATE SET daily_limit = excluded.daily_limit',
+          email, dailyLimit);
+      }
+      return Response.json({ email, dailyLimit });
+    }
+    const { action, uid, email } = await request.json();
+    if (!Object.hasOwn(limits, action) || typeof uid !== 'string') {
+      return new Response(null, { status: 400 });
+    }
+    const [baseLimit, global] = limits[action];
     const today = new Date().toISOString().slice(0, 10);
     const allowed = this.storage.transactionSync(() => {
+      const custom = action === 'start' && typeof email === 'string'
+        ? this.sql.exec('SELECT daily_limit FROM circuit_limits WHERE email = ?', email).toArray()[0]?.daily_limit : undefined;
+      const perUser = custom ?? baseLimit;
       this.sql.exec('DELETE FROM counters WHERE day <> ?', today);
       const keys = [`all:${action}`, `user:${action}:${uid}`];
       const counts = keys.map((key) => this.sql.exec('SELECT value FROM counters WHERE id = ?', key).toArray()[0]?.value ?? 0);
@@ -31,10 +50,10 @@ export class DailyLimits {
   }
 }
 
-async function spend(env, action, uid) {
+async function spend(env, action, uid, email) {
   if (!env.LIMITS) throw new ApiError(503, 'El control de cuota requiere configuración.');
   const response = await env.LIMITS.getByName('daily').fetch('https://limits.internal', {
-    method: 'POST', body: JSON.stringify({ action, uid }),
+    method: 'POST', body: JSON.stringify({ action, uid, email }),
   });
   if (response.status === 429) return false;
   if (response.status !== 204) throw new ApiError(503, 'El control de cuota no está disponible.');
@@ -82,7 +101,7 @@ function shuffle(items) {
 }
 
 async function newCircuit(db, env, identity, invitation, requested) {
-  if (!await spend(env, 'start', identity.uid)) throw new ApiError(429, 'Se alcanzó el límite diario de circuitos.');
+  if (!await spend(env, 'start', identity.uid, identity.email)) throw new ApiError(429, 'Se alcanzó el límite diario de circuitos.');
   const cases = [];
   const ids = [];
   const tried = new Set();
@@ -210,8 +229,8 @@ async function modelAnswer(db, env, caller, messages, maxTokens) {
 }
 
 async function dialogue(db, env, caller, currentCase, question, history) {
-  const social = socialReply(question);
-  if (social) return { mode: 'structured', reply: social };
+  const immediate = socialReply(question) ?? patientBackgroundReply(currentCase, question);
+  if (immediate) return { mode: 'structured', reply: immediate };
 
   const facts = currentCase.interactions.filter((item) => item.group === 'anamnesis').map(({ label, reply }) => ({ label, reply }));
   const instructions = [
@@ -273,6 +292,28 @@ async function review(db, env, identity, resultId, body) {
   return answer ?? { mode: 'structured', reply: reviewReply(facts, question, history) };
 }
 
+async function adminCircuitLimits(request, db, env, identity, headers) {
+  await db.get('admins/' + identity.uid, false, 403);
+  if (!env.LIMITS) throw new ApiError(503, 'El control de cuota requiere configuración.');
+  const store = env.LIMITS.getByName('daily');
+  const url = 'https://limits.internal/circuit-limits';
+  let response;
+  if (request.method === 'GET') {
+    response = await store.fetch(url);
+  } else {
+    const body = await bodyOf(request);
+    permittedShape(body, ['email', 'dailyLimit']);
+    const email = typeof body.email === 'string' ? normalizeEmail(body.email) : null;
+    if (!email || !validCircuitLimit(body.dailyLimit)) {
+      throw new ApiError(400, `Elige un correo válido y un límite entero de ${DAILY_CIRCUITS_DEFAULT} a ${DAILY_CIRCUITS_MAX}.`);
+    }
+    await db.get('authorized_emails/' + email);
+    response = await store.fetch(url, { method: 'POST', body: JSON.stringify({ email, dailyLimit: body.dailyLimit }) });
+  }
+  if (!response.ok) throw new ApiError(503, 'El control de cuota no está disponible.');
+  return Response.json(await response.json(), { headers });
+}
+
 export function createHandler({ verify = verifyGoogleToken, database = firestore } = {}) {
   return async (request, env) => {
     const origin = request.headers.get('Origin');
@@ -292,6 +333,9 @@ export function createHandler({ verify = verifyGoogleToken, database = firestore
       const invitation = await db.get('authorized_emails/' + identity.email, false, 403);
       if (invitation.data.active !== true) throw new ApiError(403, 'Esta cuenta no está autorizada.');
       const path = new URL(request.url).pathname;
+      if (path === '/admin/circuit-limits' && ['GET', 'POST'].includes(request.method)) {
+        return await adminCircuitLimits(request, db, env, identity, headers);
+      }
       const many = /^\/circuits\/([a-z0-9_-]+)(?:\/(next|submit|dialogue))?$/.exec(path);
       if (path === '/access' && request.method === 'GET') return Response.json({ active: true }, { headers });
       const reviewRoute = /^\/reviews\/([a-z0-9_-]{1,64})$/.exec(path);
