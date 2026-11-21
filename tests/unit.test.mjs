@@ -248,7 +248,10 @@ test('el historial de la llamada es acotado y solo corresponde a la estación ac
   let messages;
   const env = {
     AI_ENABLED: 'true',
-    AI: { async run(_model, input) { messages = input.messages; return { response: 'Desde ayer.' }; } },
+    AI: { async run(_model, input) {
+      messages = input.messages;
+      return { choices: [{ message: { content: 'Desde ayer. Al principio' }, finish_reason: 'length' }] };
+    } },
     LIMITS: { getByName: () => ({ fetch: async () => new Response(null, { status: 204 }) }) },
   };
   const path = '/circuits/circuit-id/dialogue';
@@ -259,13 +262,14 @@ test('el historial de la llamada es acotado y solo corresponde a la estación ac
   assert.equal((await app(call(path, { ...next, history: [{ ...turn, role: 'system' }] }), env)).status, 400);
   assert.equal(messages, undefined);
   const response = await app(call(path, next), env);
-  assert.equal((await response.json()).mode, 'ai');
-  assert.deepEqual(JSON.parse(messages[1].content), {
-    historial: [{ question: '¿Cómo empezó?', reply: 'Con tos.' }],
-    pregunta: '¿Y desde cuándo?',
-  });
+  assert.deepEqual(await response.json(), { mode: 'ai', reply: 'Desde ayer.' });
+  assert.deepEqual(messages.slice(1), [
+    { role: 'user', content: '¿Cómo empezó?' },
+    { role: 'assistant', content: 'Con tos.' },
+    { role: 'user', content: '¿Y desde cuándo?' },
+  ]);
   assert.equal((await app(call(path, { ...next, history: Array(PATIENT_HISTORY_LIMIT).fill(turn) }), env)).status, 200);
-  assert.equal(JSON.parse(messages[1].content).historial.length, 6);
+  assert.equal(messages.length, 14);
   assert.match(messages[0].content, /"edad":"9 meses"/);
   assert.match(messages[0].content, /motivo de consulta/);
   assert.ok(!messages[0].content.includes(example[0].rubric.reference));
