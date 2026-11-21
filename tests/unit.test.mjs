@@ -76,6 +76,15 @@ test('el familiar reconoce la presentación y responde con los datos del caso cu
     { question: '¿Por qué vinieron hoy?' }, { question: 'Muchas gracias' },
   ]), 'Empezó anoche.');
   assert.match(structured(currentCase, '¿Tiene alergia a la leche?'), /No sabría confirmarle/);
+  for (const phrase of ['¿Sufre de algo?', 'Padece de algo', '¿Tiene alguna enfermedad de base?']) {
+    assert.equal(structured(currentCase, phrase),
+      'No que yo sepa. ¿Se refiere a alguna enfermedad en particular?');
+  }
+  const knownBackground = { ...currentCase, interactions: [...currentCase.interactions,
+    { group: 'anamnesis', label: 'Antecedentes personales', reply: 'Tiene asma desde pequeño.' },
+    { group: 'anamnesis', label: 'Antecedentes familiares', reply: 'Su madre también tiene asma.' }] };
+  assert.equal(structured(knownBackground, '¿Sufre de algo?'), 'Tiene asma desde pequeño.');
+  assert.equal(structured(knownBackground, '¿Tiene algún antecedente familiar?'), 'Su madre también tiene asma.');
 });
 
 test('Worker bloquea IA para cuenta anónima, sin invitación, revocada o circuito ajeno', async () => {
