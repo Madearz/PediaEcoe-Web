@@ -93,7 +93,7 @@ Las pruebas locales usan un proyecto emulado con identificadores de prueba y un 
 | Firebase Authentication | Google como proveedor social. Conserva Spark y el proveedor estándar. No se usa autenticación por SMS ni un proveedor de pago. |
 | Firestore Standard | Una base con cuota gratuita por proyecto, 1 GiB, 50 000 lecturas diarias, 20 000 escrituras, 20 000 eliminaciones y 10 GiB mensuales de salida. Las consultas se paginan, el historial usa índices y el resumen se actualiza en la misma escritura del resultado. Las lecturas de reglas también pueden consumir cuota. |
 | Workers Free | Hasta 100 000 solicitudes diarias y 10 ms de CPU por solicitud en el plan Free. Los circuitos se limitan a 5 por cuenta y 350 por día en la aplicación. El recuento de la aplicación usa días UTC. |
-| Workers AI | La cuota gratuita publicada es 10 000 Neurons diarias por cuenta. Depende del modelo y de los tokens consumidos. El Worker limita los intentos de IA a 8 por estudiante y 100 globales por día, con respuestas cortas. El diálogo en línea tiene un límite adicional de 40 por estudiante y 2 000 globales por día. Las cuotas del proveedor prevalecen. |
+| Workers AI | La cuota gratuita publicada es 10 000 Neurons diarias por cuenta. Depende del modelo y de los tokens consumidos. El Worker limita los intentos de IA a 24 por estudiante y 800 globales por día, compartidos entre la entrevista y la revisión de resultados. El diálogo en línea tiene un límite adicional de 40 por estudiante y 2 000 globales por día. Las cuotas del proveedor prevalecen. |
 | Durable Objects SQLite | El contador de cuotas usa almacenamiento SQLite compatible con Workers Free. Guarda conteos del día por UID y los elimina al cambiar de día. |
 | GitHub Pages | Con GitHub Free se publica desde un repositorio público. GitHub aplica límites de tamaño, transferencia y uso de Actions. El repositorio se mantiene libre de datos personales y claves. |
 
@@ -114,7 +114,7 @@ Fuentes de cuotas oficiales
 
 Durante una estación, pulsa **Iniciar llamada** y concede permiso al micrófono. Habla cuando aparezca **Te escucha**. La aplicación envía una pregunta, reproduce la respuesta y reactiva el micrófono cuando el familiar termina. **Colgar** cancela el turno y detiene la voz. El dictado editable y las preguntas escritas siguen disponibles.
 
-El micrófono y la voz dependen del soporte de Web Speech en el navegador. Puedes ver la transcripción durante la estación. Con Workers AI, se envían la pregunta y hasta dos turnos recientes como texto para contextualizar la respuesta. La aplicación no sube archivos de audio ni guarda la conversación en Firestore. Si la IA está apagada, no responde o agota su cuota, se leen las respuestas estructuradas del caso. La lista de criterios evaluables sigue disponible en **Anamnesis**.
+El micrófono y la voz dependen del soporte de Web Speech en el navegador. Puedes ver la transcripción durante la estación. Pregunta en tus propias palabras por el motivo de consulta, los síntomas, su evolución o los antecedentes. Para los seguimientos, Workers AI recibe la pregunta y hasta seis turnos recientes de esa estación como texto. La aplicación no sube archivos de audio ni guarda la conversación en Firestore. Si la IA está apagada, no responde o agota su cuota, se usan las respuestas estructuradas del caso. La lista de criterios evaluables sigue disponible en **Anamnesis**.
 
 ## Chat de revisión
 

@@ -4,7 +4,7 @@ import { generateKeyPair, SignJWT } from 'jose';
 import { ApiError, verifyGoogleToken } from '../worker/firebase.mjs';
 import { createHandler } from '../worker/index.mjs';
 import { grade, readInvitations, structured, validAnswers, validCase } from '../shared/clinical.mjs';
-import { socialReply } from '../shared/dialogue.mjs';
+import { PATIENT_HISTORY_LIMIT, socialReply } from '../shared/dialogue.mjs';
 import { readFile } from 'node:fs/promises';
 
 const bearer = { Authorization: 'Bearer a.b.c', 'Content-Type': 'application/json' };
@@ -49,6 +49,7 @@ test('verifica firma, proyecto, expiración y proveedor Google con llaves de pru
 
 test('el familiar reconoce la presentación y responde con los datos del caso cuando hay una pregunta', () => {
   const currentCase = {
+    scenario: 'Lactante de 9 meses con tos.',
     opening: 'Lo traje porque tiene tos.',
     interactions: [
       { group: 'anamnesis', label: 'Inicio de la tos', reply: 'Empezó anoche.' },
@@ -63,10 +64,17 @@ test('el familiar reconoce la presentación y responde con los datos del caso cu
   assert.equal(socialReply('Hola, soy la doctora Lina, ¿fue al jardín?'), null);
   assert.equal(structured(currentCase, 'Hola, soy la doctora Lina, ¿qué le trae hoy?'),
     'Mucho gusto. Lo traje porque tiene tos.');
+  for (const phrase of ['¿Cuál es el motivo de la consulta?', 'Qué los trae por aquí', '¿Por qué vinieron hoy?']) {
+    assert.equal(structured(currentCase, phrase), currentCase.opening);
+  }
+  assert.equal(structured(currentCase, '¿Qué edad tiene su hijo?'), 'Tiene 9 meses.');
   assert.equal(structured(currentCase, 'Hola, soy la doctora Lina, ¿desde cuándo tiene tos?'),
     'Mucho gusto. Empezó anoche.');
   assert.equal(structured(currentCase, '¿Y hace cuánto?', [{ question: '¿Tiene tos?', reply: 'Hace años.' }]),
     'Empezó anoche.');
+  assert.equal(structured(currentCase, '¿Y qué pasó después?', [
+    { question: '¿Por qué vinieron hoy?' }, { question: 'Muchas gracias' },
+  ]), 'Empezó anoche.');
   assert.match(structured(currentCase, '¿Tiene alergia a la leche?'), /No sabría confirmarle/);
 });
 
@@ -247,7 +255,7 @@ test('el historial de la llamada es acotado y solo corresponde a la estación ac
   const turn = { question: ' ¿Cómo empezó? ', reply: ' Con tos. ' };
   const next = { question: '¿Y desde cuándo?', history: [turn], index: 1 };
   assert.equal((await app(call(path, { ...next, index: 0 }), env)).status, 409);
-  assert.equal((await app(call(path, { ...next, history: [turn, turn, turn] }), env)).status, 400);
+  assert.equal((await app(call(path, { ...next, history: Array(PATIENT_HISTORY_LIMIT + 1).fill(turn) }), env)).status, 400);
   assert.equal((await app(call(path, { ...next, history: [{ ...turn, role: 'system' }] }), env)).status, 400);
   assert.equal(messages, undefined);
   const response = await app(call(path, next), env);
@@ -256,6 +264,11 @@ test('el historial de la llamada es acotado y solo corresponde a la estación ac
     historial: [{ question: '¿Cómo empezó?', reply: 'Con tos.' }],
     pregunta: '¿Y desde cuándo?',
   });
+  assert.equal((await app(call(path, { ...next, history: Array(PATIENT_HISTORY_LIMIT).fill(turn) }), env)).status, 200);
+  assert.equal(JSON.parse(messages[1].content).historial.length, 6);
+  assert.match(messages[0].content, /"edad":"9 meses"/);
+  assert.match(messages[0].content, /motivo de consulta/);
+  assert.ok(!messages[0].content.includes(example[0].rubric.reference));
 });
 
 test('el repaso distingue decisiones incorrectas de criterios omitidos y sirve con notas antiguas', async () => {

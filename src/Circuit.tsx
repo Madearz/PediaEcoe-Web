@@ -10,6 +10,7 @@ import { scene } from './App';
 import { canListen, canSpeak, listenForQuestion, playSpeech, speak, useVoice } from './voice';
 import { createVoiceCall, type CallPhase, type CallState } from './voice-call';
 import { PHASES, SINGLE, STATION_MS, structured, type CaseData, type Grade, type Group, type Interaction } from '../shared/clinical.mjs';
+import { PATIENT_HISTORY_LIMIT } from '../shared/dialogue.mjs';
 
 type Session = { id: string; index: number; complete: boolean; case: CaseData | null; titles: string[]; deadline: number | null; serverNow: number };
 type Turn = { question: string; reply: string; mode: 'structured'|'ai' };
@@ -105,7 +106,9 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
     setTurns(transcript.current);
   }
   async function requestAnswer(question: string, signal: AbortSignal) {
-    const history = transcript.current.slice(-2).map((turn) => ({ question: turn.question, reply: turn.reply.slice(0, 400) }));
+    const history = transcript.current.slice(-PATIENT_HISTORY_LIMIT).map((turn) => ({
+      question: turn.question, reply: turn.reply.slice(0, 400),
+    }));
     let answer: Omit<Turn, 'question'>;
     try {
       answer = await call(user, '/circuits/' + session.id + '/dialogue', { question, history, index: session.index }, signal);
@@ -192,7 +195,7 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
               onClick={() => { if (canSpeak && !voice.listening) window.speechSynthesis.cancel(); voice.toggle(); }}>
               {voice.listening ? <MicOff size={18}/> : <Mic size={18}/>}
             </button>}
-            <input aria-label="Pregunta al familiar" placeholder={callActive ? 'Cuelga para enviar una pregunta escrita' : 'Escribe una pregunta al familiar ficticio…'}
+            <input aria-label="Pregunta al paciente o al familiar" placeholder={callActive ? 'Cuelga para enviar una pregunta escrita' : 'Ejemplo: ¿Qué los trae a consulta hoy?'}
               maxLength={400} value={text} onChange={(event) => setText(event.target.value)}/>
             <button className="button primary" aria-label="Enviar pregunta" disabled={!time || callActive || voice.listening || sending || saving || !text.trim()}><Send size={18}/></button>
           </form>

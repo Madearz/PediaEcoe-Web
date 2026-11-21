@@ -7,7 +7,7 @@ workers_dev = true
 FIREBASE_PROJECT_ID = "pediaecoe-ai"
 ALLOWED_ORIGINS = "https://madearz.github.io"
 AI_ENABLED = "true"
-AI_MODEL = "@cf/meta/llama-3.1-8b-instruct"
+AI_MODEL = "@cf/ibm-granite/granite-4.0-h-micro"
 
 [ai]
 binding = "AI"

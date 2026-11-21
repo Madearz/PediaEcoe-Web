@@ -1,6 +1,9 @@
 const normalize = (text) => text.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase()
   .replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
 
+export const PATIENT_HISTORY_LIMIT = 6;
+export const patientAge = (data) => data.scenario?.match(/\bde (\d+ (?:años?|mes(?:es)?|semanas?|días?))\b/i)?.[1];
+
 const ignored = new Set(['acerca', 'algun', 'alguna', 'antes', 'algo', 'como', 'cuando', 'cuanto', 'desde', 'donde', 'hace',
   'manera', 'nino', 'nina', 'puede', 'podria', 'pregunta', 'sobre', 'tiene', 'usted', 'doctor', 'doctora']);
 const timingQuestion = /\b(desde cuando|hace cuanto|cuando (empezo|comenzo|inicio)|desde que (dia|hora)|hace cuantos dias|inicio|duracion)\b/;
@@ -22,8 +25,9 @@ const subjects = [
   [/\b(apnea|pausa|pausas)\b/, /apnea|pausa/],
 ];
 const questionSignal = /\b(que (le |lo |la )?(paso|ocurrio|preocupa|trajo|trae|notaron|noto)|como (empezo|comenzo|esta (el nino|la nina|su hijo|su hija))|cuando (le |lo |la )?(empezo|comenzo|inicio|ocurrio)|desde cuando|hace cuanto|cuanto tiempo|donde le|ha tenido|ha notado|le duele|tiene|ha presentado)\b/;
-const openQuestion = /\b(que (le |lo |la )?(trae|trajo|paso|ocurrio|preocupa)|motivo de (consulta|visita)|como (empezo|comenzo) todo|cuenteme que paso|que le pasa|en que puedo (ayudarle|ayudar))\b/;
-const followUp = /^(?:y )?(?:desde cuando|cuando fue|hace cuanto|cuanto tiempo|y luego|despues|que paso despues|algo mas|me cuenta mas|podria contarme mas|y eso|como asi)(?: paso| exactamente)?$/;
+const openQuestion = /\b(que (?:(?:le|lo|la|les|los|las|te) )?(?:trae|trajo|paso|ocurrio|preocupa)|por que (?:vino|vinieron|viene|vienen|consulto|consultan|(?:lo |la )?(?:trajo|trajeron))|por que motivo|motivo (?:de (?:la )?|por el que )(?:consulta|visita|vino)|razon de (?:la )?(?:consulta|visita)|como (?:empezo|comenzo) todo|cuenteme que paso|que (?:le )?pasa|en que (?:le |te )?puedo (?:ayudarle|ayudar))\b/;
+const followUp = /^(?:y )?(?:desde cuando|cuando fue|hace cuanto|cuanto tiempo|luego|despues|que paso despues|que mas|algo mas|me cuenta mas|podria contarme mas|eso|como asi)(?: paso| exactamente)?$/;
+const ageQuestion = /\b(que edad tiene|cuantos (?:anos|meses) tiene|cual es (?:la|su) edad)\b/;
 
 function findFact(items, text) {
   const words = [...new Set(text.match(/[a-z]{4,}/g) ?? [])].filter((word) => !ignored.has(word));
@@ -86,15 +90,23 @@ export function structured(currentCase, question, history = []) {
   const socialTurn = social(question);
   if (socialTurn.only) return socialTurn.only;
   const text = normalize(question);
-  if (openQuestion.test(text)) return [socialTurn.prefix, currentCase.opening].filter(Boolean).join(' ');
   const facts = currentCase.interactions.filter((item) => item.group === 'anamnesis' && item.reply);
   let reply;
-  const prior = history.at(-1)?.question;
-  if (prior && followUp.test(text)) {
-    const previous = findFact(facts, normalize(prior));
-    const related = findFact(facts, normalize(prior + ' ' + question));
-    reply = related?.reply || previous?.reply;
+  if (followUp.test(text)) {
+    // Social turns and earlier follow-ups can intervene between a topic and the next clinical question.
+    for (const turn of [...history].reverse()) {
+      if (socialReply(turn.question) || followUp.test(normalize(turn.question))) continue;
+      if (openQuestion.test(normalize(turn.question))) {
+        reply = findFact(facts, text)?.reply || facts[0]?.reply;
+      } else {
+        reply = findFact(facts, normalize(turn.question + ' ' + question))?.reply;
+      }
+      break;
+    }
   }
+  if (!reply && openQuestion.test(text)) reply = currentCase.opening;
+  const age = ageQuestion.test(text) ? patientAge(currentCase) : undefined;
+  if (!reply && age) reply = `Tiene ${age}.`;
   reply ||= findFact(facts, text)?.reply;
   if (!reply && allergyQuestion.test(text)) reply = 'No sabría confirmarle si tiene alguna alergia. ¿Se refiere a algún medicamento o alimento en particular?';
   if (!reply && medicationQuestion.test(text)) reply = 'No recuerdo ese detalle con seguridad. ¿Me pregunta por algo que le dieron antes o por lo que recibió hoy?';
