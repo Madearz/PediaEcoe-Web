@@ -6,12 +6,25 @@ import { ApiError, verifyGoogleToken } from '../worker/firebase.mjs';
 import { createHandler, DailyLimits } from '../worker/index.mjs';
 import { grade, readInvitations, structured, validAnswers, validCase } from '../shared/clinical.mjs';
 import { PATIENT_HISTORY_LIMIT, socialReply } from '../shared/dialogue.mjs';
+import { caseGroups } from '../shared/case-groups.mjs';
 import { readFile } from 'node:fs/promises';
 
 const bearer = { Authorization: 'Bearer a.b.c', 'Content-Type': 'application/json' };
 const call = (path, body) => new Request('https://worker.example' + path, body === undefined ? { headers: bearer }
   : { method: 'POST', headers: bearer, body: JSON.stringify(body) });
 const example = JSON.parse(await readFile(new URL('../content/casos-iniciales.json', import.meta.url), 'utf8'));
+
+test('el banco clasifica los casos previos y conserva los grupos elegidos en administración', async () => {
+  assert.deepEqual(await caseGroups('hiponatremia'), ['A']);
+  assert.deepEqual(await caseGroups('diarrea-persistente'), ['B']);
+  assert.deepEqual(await caseGroups('practica100-bronquiolitis-apnea'), ['A', 'B']);
+  assert.deepEqual(await caseGroups('nuevo', undefined, 'Guía local · Grupo B, pp. 3–5 · Grupo A pp. 7'), ['A', 'B']);
+  assert.deepEqual(await caseGroups('nuevo', undefined, 'Grupo ABC'), []);
+  assert.deepEqual(await caseGroups('practica100-bronquiolitis-apnea', ['B']), ['B']);
+  assert.deepEqual(await caseGroups('hiponatremia', []), []);
+  assert.ok(validCase({ ...example[0].data, curricularGroups: ['A', 'B'] }, example[0].rubric));
+  assert.equal(validCase({ ...example[0].data, curricularGroups: ['A', 'A'] }, example[0].rubric), false);
+});
 
 test('tres borradores válidos y evaluación con decisiones mutuamente excluyentes', () => {
   assert.equal(example.length, 3);

@@ -5,13 +5,14 @@ import { collection, count, doc, deleteDoc, getAggregateFromServer, getDocFromSe
   query, runTransaction, setDoc, sum, writeBatch } from 'firebase/firestore';
 import { database } from './Student';
 import { call, messageOf } from './firebase';
-import { DAILY_CIRCUITS_DEFAULT, DAILY_CIRCUITS_MAX, GROUPS, normalizeEmail, readInvitations, validCase, validId, type CaseData, type Rubric } from '../shared/clinical.mjs';
+import { CURRICULAR_GROUPS, DAILY_CIRCUITS_DEFAULT, DAILY_CIRCUITS_MAX, GROUPS, normalizeEmail, readInvitations, validCase, validId, type CaseData, type CurricularGroup, type Rubric } from '../shared/clinical.mjs';
+import { caseGroups } from '../shared/case-groups.mjs';
 
-const emptyCase: CaseData = { title: '', category: '', difficulty: 'Media', scenario: '', opening: '', status: 'draft', interactions: [] };
+const emptyCase: CaseData = { title: '', category: '', difficulty: 'Media', scenario: '', opening: '', status: 'draft', interactions: [], curricularGroups: [] };
 const emptyRubric: Rubric = { diagnosis: '', reference: '', criteria: [], critical: [] };
 type Invitation = { email: string; active: boolean };
 type CircuitLimit = { email: string; dailyLimit: number };
-type CaseItem = { id: string; title: string; status: CaseData['status'] };
+type CaseItem = { id: string; title: string; status: CaseData['status']; curricularGroups: CurricularGroup[] };
 type Stat = { students: number; submitted: number; circuits: number; total: number };
 const statuses = { draft: 'Borrador', review: 'En revisión médica', published: 'Publicado' };
 
@@ -162,7 +163,10 @@ function CaseEditor() {
   };
   async function list() {
     const snapshot = await getDocsFromServer(query(collection(database, 'case_bank'), orderBy('title'), limit(400)));
-    setRows(snapshot.docs.map((item) => ({ id: item.id, title: item.data().title, status: item.data().status })));
+    setRows(await Promise.all(snapshot.docs.map(async (item) => {
+      const { title, status, curricularGroups } = item.data() as CaseData;
+      return { id: item.id, title, status, curricularGroups: await caseGroups(item.id, curricularGroups) };
+    })));
   }
   useEffect(() => { void list().catch((failure) => setError(messageOf(failure))).finally(() => setBusy(false)); }, []);
   async function run(operation: () => Promise<void>) {
@@ -177,7 +181,9 @@ function CaseEditor() {
       if (!item.exists()) throw new Error('El caso no está disponible.');
       setSelected(id);
       setDraftId(id);
-      reset(item.data() as CaseData, hidden.exists() ? hidden.data() as Rubric : emptyRubric);
+      const current = item.data() as CaseData;
+      const scoring = hidden.exists() ? hidden.data() as Rubric : emptyRubric;
+      reset({ ...current, curricularGroups: await caseGroups(id, current.curricularGroups, scoring.reference) }, scoring);
     });
   }
   function save(event: FormEvent) {
@@ -215,6 +221,7 @@ function CaseEditor() {
       let imported = 0;
       for (let offset = 0; offset < cases.length; offset += 20) {
         const group = cases.slice(offset, offset + 20);
+        const groups = await Promise.all(group.map((item) => caseGroups(item.id, item.data.curricularGroups, item.rubric.reference)));
         try {
           imported += await runTransaction(database, async (transaction) => {
             const records = await Promise.all(group.map((item) => transaction.get(doc(database, 'case_bank', item.id))));
@@ -222,7 +229,7 @@ function CaseEditor() {
             records.forEach((record, index) => {
               if (record.exists()) return;
               const item = group[index];
-              transaction.set(record.ref, { ...item.data, status: 'review' });
+              transaction.set(record.ref, { ...item.data, status: 'review', curricularGroups: groups[index] });
               transaction.set(doc(database, 'case_rubrics', item.id), item.rubric);
               added++;
             });
@@ -239,13 +246,25 @@ function CaseEditor() {
   }
   return <section className="card admin-section"><h2><ClipboardList size={21}/> Gestión del banco</h2>
     <div className="inline-form"><label>Caso guardado<select disabled={busy} value={selected} onChange={(event) => open(event.target.value)}>
-      <option value="">Crear un caso</option>{rows.map((item) => <option key={item.id} value={item.id}>{item.title} · {statuses[item.status]}</option>)}
+      <option value="">Crear un caso</option>{rows.map((item) => <option key={item.id} value={item.id}>
+        {[item.title, statuses[item.status], ...item.curricularGroups.map((group) => `Grupo ${group}`)].join(' · ')}
+      </option>)}
     </select></label><label className="button secondary upload"><Upload size={17}/> Importar casos JSON<input type="file" accept=".json,application/json" disabled={busy} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) seed(file); }}/></label></div>
     {error && <p className="notice error" role="alert">{error}</p>}{note && <p className="notice" role="status">{note}</p>}
     <form className="case-form" onSubmit={save}>
       <label>Identificador<input required maxLength={64} disabled={Boolean(selected)} value={draftId} onChange={(event) => setDraftId(event.target.value)}/></label>
       <label>Título<input required maxLength={110} value={data.title} onChange={(event) => setData({ ...data, title: event.target.value })}/></label>
       <label>Categoría<input required maxLength={80} value={data.category} onChange={(event) => setData({ ...data, category: event.target.value })}/></label>
+      <fieldset className="curricular-groups">
+        <legend>Grupos curriculares</legend>
+        {CURRICULAR_GROUPS.map((group) => <label className="checkbox" key={group}>
+          <input type="checkbox" checked={data.curricularGroups?.includes(group) ?? false} onChange={(event) => {
+            const selectedGroups = data.curricularGroups ?? [];
+            const curricularGroups = event.target.checked ? [...selectedGroups, group] : selectedGroups.filter((entry) => entry !== group);
+            setData({ ...data, curricularGroups });
+          }}/> Grupo {group}
+        </label>)}
+      </fieldset>
       <label>Dificultad<select value={data.difficulty} onChange={(event) => setData({ ...data, difficulty: event.target.value as CaseData['difficulty'] })}>
         <option>Baja</option><option>Media</option><option>Alta</option></select></label>
       <label>Estado<select value={data.status} onChange={(event) => setData({ ...data, status: event.target.value as CaseData['status'] })}>

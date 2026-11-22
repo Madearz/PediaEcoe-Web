@@ -152,6 +152,7 @@ textarea { resize: vertical; }
 .findings { background: #f2f0fc; border: 1px solid var(--border); border-radius: 13px; margin-top: .8rem; padding: .75rem; }
 .findings p { margin-top: .45rem; font-size: .91rem; }
 .option-list, .admin-tabs, .action-row { display: flex; flex-wrap: wrap; gap: .45rem; }
+.case-filters { margin-bottom: .85rem; }
 .station-footer { padding: .55rem .7rem; background: #eeebfc; border: 1px solid var(--border); border-radius: 14px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .55rem; }
 .station-footer span { display: flex; gap: .5rem; align-items: center; color: var(--deep); font-weight: 650; font-size: .9rem; }
 .inline-form { display: flex; align-items: flex-end; gap: .65rem; flex-wrap: wrap; margin-bottom: .7rem; }
@@ -168,6 +169,8 @@ textarea { resize: vertical; }
 .case-form { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .7rem; }
 .case-form .wide { grid-column: 1/-1; }
 .case-form .checkbox { display: flex; align-items: center; }
+.curricular-groups { min-width: 0; display: flex; flex-wrap: wrap; gap: .65rem; border: 1px solid var(--border); border-radius: 9px; }
+.curricular-groups legend { color: var(--muted); font-size: .91rem; font-weight: 620; }
 .checkbox input { width: 1rem; min-height: 1rem; }
 @media(max-width: 1000px) {
   .layout { grid-template-columns: 190px minmax(0,1fr); }

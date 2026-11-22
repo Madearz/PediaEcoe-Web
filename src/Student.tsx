@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { BarChart3, BookOpen, BriefcaseMedical, CircleCheck, CircleAlert, Stethoscope } from 'lucide-react';
 import type { User } from 'firebase/auth';
@@ -7,7 +7,8 @@ import { collection, doc, getDocFromServer, getDocsFromServer, limit, orderBy, q
 import { db, messageOf } from './firebase';
 import { ReviewChat } from './ReviewChat';
 import { Avatar } from './App';
-import { DOMAINS, PHASES, type CaseData, type Grade } from '../shared/clinical.mjs';
+import { CURRICULAR_GROUPS, DOMAINS, PHASES, type CaseData, type CurricularGroup, type Grade } from '../shared/clinical.mjs';
+import { caseGroups } from '../shared/case-groups.mjs';
 
 export const database = db!;
 export const pageSize = 12;
@@ -15,29 +16,50 @@ export const resultDate = (date: { toDate(): Date } | undefined) => date
   ? new Intl.DateTimeFormat('es-CO', { dateStyle: 'medium', timeStyle: 'short' }).format(date.toDate()) : '';
 
 export function Cases() {
-  const [cases, setCases] = useState<(CaseData & { id: string })[]>([]);
+  const [cases, setCases] = useState<(CaseData & { id: string; curricularGroups: CurricularGroup[] })[]>([]);
   const [cursor, setCursor] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  async function load(next?: QueryDocumentSnapshot<DocumentData>) {
+  const [group, setGroup] = useState<CurricularGroup | 'all'>('all');
+  const inFlight = useRef(false);
+  const visible = group === 'all' ? cases : cases.filter((item) => item.curricularGroups.includes(group));
+  const load = useCallback(async (next?: QueryDocumentSnapshot<DocumentData>) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setLoading(true);
     setError('');
     try {
       const snapshot = await getDocsFromServer(query(collection(database, 'case_bank'), where('status', '==', 'published'),
         ...(next ? [startAfter(next)] : []), limit(pageSize)));
-      const data = snapshot.docs.map((item) => ({ ...item.data() as CaseData, id: item.id }));
+      const data = await Promise.all(snapshot.docs.map(async (item) => {
+        const data = item.data() as CaseData;
+        return { ...data, id: item.id, curricularGroups: await caseGroups(item.id, data.curricularGroups) };
+      }));
       setCases((current) => next ? [...current, ...data] : data);
       setCursor(snapshot.size === pageSize ? snapshot.docs.at(-1)! : null);
     } catch (failure) { setError(messageOf(failure)); }
-    finally { setLoading(false); }
-  }
-  useEffect(() => { void load(); }, []);
+    finally { inFlight.current = false; setLoading(false); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (group !== 'all' && !visible.length && cursor && !loading && !error) void load(cursor);
+  }, [group, visible.length, cursor, loading, error, load]);
   return <main className="page">
     <div className="page-heading"><BriefcaseMedical/><div><h1>Banco de casos</h1><p>Escenarios pediátricos publicados</p></div></div>
+    <nav className="admin-tabs case-filters" aria-label="Filtrar casos por grupo curricular">
+      <button type="button" className={'button ' + (group === 'all' ? 'primary' : 'secondary')} aria-pressed={group === 'all'}
+        onClick={() => setGroup('all')}>Todos</button>
+      {CURRICULAR_GROUPS.map((entry) => <button type="button" key={entry}
+        className={'button ' + (group === entry ? 'primary' : 'secondary')} aria-pressed={group === entry}
+        onClick={() => setGroup(entry)}>Grupo {entry}</button>)}
+    </nav>
     {error && <p className="notice error" role="alert">{error}</p>}
-    {!loading && !error && !cases.length && <p className="card">Aún no hay casos publicados.</p>}
-    <div className="card-grid">{cases.map((item) => <article className="card" key={item.id}>
-      <span className="pill">{item.difficulty}</span><h2>{item.title}</h2><p>{item.category}</p><p>{item.scenario}</p>
+    {!loading && !error && !visible.length && !cursor && <p className="card">
+      {group === 'all' ? 'Aún no hay casos publicados.' : `Aún no hay casos publicados del Grupo ${group}.`}
+    </p>}
+    <div className="card-grid">{visible.map((item) => <article className="card" key={item.id}>
+      <span className="pill">{item.difficulty}</span><h2>{item.title}</h2>
+      <p>{[item.category, ...item.curricularGroups.map((entry) => `Grupo ${entry}`)].join(' · ')}</p><p>{item.scenario}</p>
       <Link className="button secondary" aria-label={`Practicar ${item.title}`} to={`/simulador?caso=${encodeURIComponent(item.id)}`}>Practicar este caso</Link>
     </article>)}</div>
     {loading && <p role="status">Cargando casos…</p>}

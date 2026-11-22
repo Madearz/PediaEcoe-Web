@@ -1,6 +1,7 @@
 export type Group = 'anamnesis' | 'exploracion' | 'paraclinicos' | 'razonamiento' | 'acciones' | 'cierre';
 export type Interaction = { id: string; group: Group; label: string; reply: string };
-export type CaseData = { title: string; category: string; scenario: string; opening: string; difficulty: 'Baja'|'Media'|'Alta'; status: 'draft'|'review'|'published'; interactions: Interaction[] };
+export type CurricularGroup = 'A' | 'B';
+export type CaseData = { title: string; category: string; scenario: string; opening: string; difficulty: 'Baja'|'Media'|'Alta'; status: 'draft'|'review'|'published'; interactions: Interaction[]; curricularGroups?: CurricularGroup[] };
 export type Rubric = { diagnosis: string; reference: string; criteria: {id: string; domain: number; points: number; tip: string}[]; critical: {id: string; tip: string}[] };
 export type Grade = {title: string; score: number; domains: number[]; feedback: {label:string; earned:boolean; tip:string; domain?:number}[]; critical: string[]; errors?: string[]; passed:boolean; diagnosis:string; reference:string};
 export const STATION_MS: number;
@@ -9,6 +10,8 @@ export const DAILY_CIRCUITS_MAX: number;
 export const PHASES: string[];
 export const DOMAINS: number[];
 export const GROUPS: Group[];
+export const CURRICULAR_GROUPS: CurricularGroup[];
+export function validCurricularGroups(groups: unknown): groups is CurricularGroup[];
 export const SINGLE: Group[];
 export function validCase(data: unknown, rubric: unknown): boolean;
 export function validAnswers(data: CaseData, selections: unknown): boolean;

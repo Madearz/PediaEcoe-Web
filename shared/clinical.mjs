@@ -4,16 +4,20 @@ export const DAILY_CIRCUITS_MAX = 50;
 export const PHASES = ['Anamnesis', 'Examen físico', 'Razonamiento', 'Tratamiento', 'Cierre'];
 export const DOMAINS = [20, 20, 20, 25, 15];
 export const GROUPS = ['anamnesis', 'exploracion', 'paraclinicos', 'razonamiento', 'acciones', 'cierre'];
+export const CURRICULAR_GROUPS = ['A', 'B'];
 export const SINGLE = ['razonamiento', 'acciones', 'cierre'];
 const idPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const short = (item, max) => typeof item === 'string' && item.trim().length > 0 && item.length <= max;
 export const validId = (id) => typeof id === 'string' && idPattern.test(id);
+export const validCurricularGroups = (groups) => Array.isArray(groups) && groups.length <= CURRICULAR_GROUPS.length
+  && new Set(groups).size === groups.length && groups.every((group) => CURRICULAR_GROUPS.includes(group));
 
 export function validCase(data, rubric) {
   if (!data || !rubric || !short(data.title, 110) || !short(data.category, 80)
       || !short(data.scenario, 750) || !short(data.opening, 750)
       || !['Baja', 'Media', 'Alta'].includes(data.difficulty)
       || !['draft', 'review', 'published'].includes(data.status)
+      || (data.curricularGroups !== undefined && !validCurricularGroups(data.curricularGroups))
       || !Array.isArray(data.interactions) || data.interactions.length < 5 || data.interactions.length > 35
       || !short(rubric.diagnosis, 200) || !short(rubric.reference, 300)
       || !Array.isArray(rubric.criteria) || rubric.criteria.length > 35
