@@ -7,7 +7,9 @@ import { createHandler, DailyLimits } from '../worker/index.mjs';
 import { grade, readInvitations, structured, validAnswers, validCase } from '../shared/clinical.mjs';
 import { PATIENT_HISTORY_LIMIT, socialReply } from '../shared/dialogue.mjs';
 import { caseGroups } from '../shared/case-groups.mjs';
-import { examAreas, requestedExam } from '../shared/exam.mjs';
+import { examAreas, requestedExam, systemExam } from '../shared/exam.mjs';
+import { practiceFocus, registerAnamnesis } from '../shared/learning.mjs';
+import { addDiagnosticChoices } from '../worker/evolutions.mjs';
 import { displayStoredStudy, MISSING_STUDY_VALUE, requestedStudies, studySuggestions } from '../shared/studies.mjs';
 import { readFile } from 'node:fs/promises';
 
@@ -32,7 +34,47 @@ test('la exploración se puede localizar por todos los sistemas que indica su et
   assert.deepEqual(examAreas('Saturación, tiraje y llenado capilar'), ['vitals', 'respiratory', 'cardiovascular']);
   assert.deepEqual(examAreas('Examen neurológico y signos meníngeos'), ['neurological']);
   assert.deepEqual(examAreas('Hidratación y exantema'), ['abdomen', 'skin']);
-  assert.deepEqual(examAreas('Otoscopia'), ['other']);
+  assert.deepEqual(examAreas('Otoscopia'), ['ent']);
+});
+
+test('la anamnesis acumula preguntas por tema y espera a cubrir los criterios agrupados', () => {
+  const interactions = [
+    { id: 'history', group: 'anamnesis', label: 'Inicio de síntomas respiratorios' },
+    { id: 'intake', group: 'anamnesis', label: 'Tomas, pañales y episodios de apnea' },
+  ];
+  const start = registerAnamnesis(interactions, '¿Desde cuándo tiene fiebre?');
+  assert.deepEqual(start.registered, []);
+  const cough = registerAnamnesis(interactions, '¿Tiene tos?', start.evidence);
+  assert.deepEqual(cough.registered, []);
+  const chronology = registerAnamnesis(interactions, '¿Desde cuándo?', cough.evidence);
+  assert.deepEqual(chronology.registered, ['history']);
+  const milk = registerAnamnesis(interactions, '¿Está tomando leche?', chronology.evidence);
+  assert.deepEqual(milk.registered, []);
+  const urination = registerAnamnesis(interactions, '¿Cuántos pañales ha mojado?', milk.evidence);
+  assert.deepEqual(urination.registered, []);
+  assert.deepEqual(registerAnamnesis(interactions, '¿Ha hecho pausas al respirar?', urination.evidence).registered, ['intake']);
+});
+
+test('la exploración completa conserva los hallazgos y solo simula sistemas sin indicios en el caso', () => {
+  const recorded = { id: 'lungs', group: 'exploracion', label: 'Auscultación pulmonar', reply: 'Sibilancias bilaterales.' };
+  const data = { title: 'Tos', scenario: 'Paciente de 8 años', opening: 'Tiene tos.', interactions: [recorded] };
+  assert.deepEqual(systemExam(data, 'respiratory').recorded, [recorded]);
+  assert.match(systemExam(data, 'abdomen').reply, /Abdomen blando/);
+  assert.equal(systemExam({ ...data, interactions: [] }, 'respiratory').reply, '');
+});
+
+test('la rúbrica separa diagnóstico principal y diferenciales sin cambiar los 100 puntos', () => {
+  const { data, rubric, id } = example[0];
+  const { public: expanded, rubric: scoring } = addDiagnosticChoices(id, data, rubric, (items) => items);
+  assert.equal(expanded.interactions.filter((item) => item.group === 'razonamiento').length, 4);
+  assert.ok(validCase(expanded, scoring));
+  const selections = rubric.criteria.map(({ id }) => id);
+  assert.equal(grade(expanded, scoring, selections, scoring.differentials).score, 100);
+  assert.equal(grade(expanded, scoring, selections, [scoring.differentials[0]]).score, 97);
+  assert.equal(grade(expanded, scoring, selections).score, 94);
+  const results = [{ domains: [20, 10, 20, 25, 15], caseId: 'case-one' }, { domains: [15, 8, 20, 25, 15] }];
+  assert.equal(practiceFocus(results).index, 1);
+  assert.equal(practiceFocus(results).result.caseId, 'case-one');
 });
 
 test('las solicitudes de examen físico devuelven los hallazgos pertinentes y separan anamnesis y permiso', () => {
@@ -300,6 +342,55 @@ test('inicia el circuito con el tema elegido y rechaza temas sin publicar', asyn
   assert.equal(ids.length, 3);
   assert.equal(new Set(ids).size, 3);
   assert.ok(!ids.includes('borrador'));
+});
+
+test('Worker conserva el tiempo en pausa y registra una sola evolución con su siguiente decisión', async () => {
+  const { id: caseId, data, rubric } = example[0];
+  const original = addDiagnosticChoices(caseId, data, rubric, (items) => items);
+  let session = { uid: 'student', index: 0, deadline: Date.now() + 20_000, caseIds: [caseId], createdAt: new Date().toISOString() };
+  let result;
+  const db = {
+    async get(path) {
+      if (path.startsWith('authorized_emails/')) return { data: { active: true } };
+      if (path.startsWith('simulation_sessions/')) return { updateTime: 'edition', data: session };
+      if (path.startsWith('private_sessions/')) return { data: { cases: [original] } };
+      throw new ApiError(404, 'No existe.');
+    },
+    write(path, data, precondition) { return { path, data, precondition }; },
+    progress() { return {}; },
+    async commit(writes) {
+      assert.deepEqual(writes[0].precondition, { updateTime: 'edition' });
+      session = writes[0].data;
+      if (writes[1]) result = writes[1].data;
+    },
+  };
+  const app = createHandler({ verify: async () => ({ uid: 'student', email: 'student@example.com' }), database: () => db });
+  const post = (action, data = {}) => app(call('/circuits/circuit-id/' + action, { index: 0, ...data }), {});
+  const frozen = await (await post('pause')).json();
+  assert.ok(frozen.pausedRemaining < 20_001 && frozen.pausedRemaining > 0);
+  assert.equal((await post('dialogue', { question: '¿Tiene tos?' })).status, 409);
+  assert.equal((await post('submit', { selections: [] })).status, 409);
+  session.deadline = Date.now() - 100_000;
+  const resumed = await (await post('resume')).json();
+  assert.equal(resumed.deadline - resumed.serverNow, frozen.pausedRemaining);
+  assert.equal(resumed.pausedRemaining, null);
+  const action = data.interactions.find((item) => item.group === 'acciones' && item.id !== rubric.criteria.find(({ domain }) => domain === 3).id).id;
+  const correct = rubric.criteria.find(({ domain }) => domain === 3).id;
+  const branch = await (await post('evolution', { action })).json();
+  assert.equal(branch.action, action);
+  assert.ok(branch.findings.length);
+  assert.equal(branch.expected, undefined);
+  assert.deepEqual(await (await post('evolution', { action })).json(), branch);
+  assert.equal((await post('evolution', { action: correct })).status, 409);
+  const selections = rubric.criteria.map(({ id }) => id);
+  assert.equal((await post('submit', { selections, differentials: [selections[0]] })).status, 400);
+  assert.equal((await post('submit', { selections, differentials: original.rubric.differentials,
+    justification: '  La edad y el patrón de síntomas.  ', followUp: 'escalar' })).status, 200);
+  assert.equal(result.justification, 'La edad y el patrón de síntomas.');
+  assert.deepEqual(result.followUp, { expected: 'Escalar la atención', chosen: 'Escalar la atención' });
+  assert.equal(result.domains[3], 0);
+  assert.equal(result.domains[2], 20);
+  assert.equal(session.evolution, undefined);
 });
 
 test('solo administración puede elevar el cupo por correo y el cambio conserva el consumo del día', async () => {

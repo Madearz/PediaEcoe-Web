@@ -5,7 +5,7 @@ import { collection, count, doc, deleteDoc, getAggregateFromServer, getDocFromSe
   query, runTransaction, setDoc, sum, writeBatch } from 'firebase/firestore';
 import { database } from './Student';
 import { call, messageOf } from './firebase';
-import { CURRICULAR_GROUPS, DAILY_CIRCUITS_DEFAULT, DAILY_CIRCUITS_MAX, GROUPS, normalizeEmail, readInvitations, validCase, validId, validStudyResults, type CaseData, type CurricularGroup, type Rubric, type StudyResult } from '../shared/clinical.mjs';
+import { CURRICULAR_GROUPS, DAILY_CIRCUITS_DEFAULT, DAILY_CIRCUITS_MAX, GROUPS, normalizeEmail, readInvitations, validCase, validId, validStudyResults, type CaseData, type CurricularGroup, type Interaction, type Rubric, type StudyResult } from '../shared/clinical.mjs';
 import { caseGroups } from '../shared/case-groups.mjs';
 import { formatStudyResult, MISSING_STUDY_VALUE, stationStudySamples } from '../shared/studies.mjs';
 
@@ -153,6 +153,27 @@ function CaseEditor() {
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const [remove, setRemove] = useState(false);
+  const [diagnosisLabel, setDiagnosisLabel] = useState('');
+  let diagnosisChoices: Interaction[] = [];
+  let primaryDiagnosis: string | undefined;
+  try {
+    const items: unknown = JSON.parse(structure);
+    const scoring: unknown = JSON.parse(criteria);
+    if (Array.isArray(items)) diagnosisChoices = items.filter((item) => item?.group === 'razonamiento' && typeof item.label === 'string');
+    if (Array.isArray(scoring)) primaryDiagnosis = scoring.find((item) => item?.domain === 2)?.id;
+  } catch { /* The JSON fields retain their own validation on save. */ }
+  function addDiagnosisChoice() {
+    const label = diagnosisLabel.trim();
+    if (!label) return;
+    try {
+      const items: unknown = JSON.parse(structure);
+      if (!Array.isArray(items) || items.length >= 35) throw new Error('Revisa las interacciones y su límite de 35.');
+      if (diagnosisChoices.some((item) => item.label.trim().toLowerCase() === label.toLowerCase())) throw new Error('Esa opción ya existe.');
+      setStructure(JSON.stringify([...items, { id: 'dx-' + crypto.randomUUID(), group: 'razonamiento', label, reply: '' }], null, 2));
+      setDiagnosisLabel('');
+      setError('');
+    } catch (failure) { setError(messageOf(failure)); }
+  }
   const studies = data.studyResults ?? [];
   const existingStudies = [
     ...data.interactions.filter((item) => item.group === 'paraclinicos').map(({ id, label, reply }) => ({
@@ -174,6 +195,7 @@ function CaseEditor() {
     setCritical(JSON.stringify(scoring.critical, null, 2));
     setReviewed(false);
     setRemove(false);
+    setDiagnosisLabel('');
   };
   async function list() {
     const snapshot = await getDocsFromServer(query(collection(database, 'case_bank'), orderBy('title'), limit(400)));
@@ -288,6 +310,22 @@ function CaseEditor() {
       <label>Estado<select value={data.status} onChange={(event) => setData({ ...data, status: event.target.value as CaseData['status'] })}>
         {Object.entries(statuses).map(([key, title]) => <option key={key} value={key}>{title}</option>)}</select></label>
       <label>Diagnóstico esperado<input required maxLength={200} value={rubric.diagnosis} onChange={(event) => setRubric({ ...rubric, diagnosis: event.target.value })}/></label>
+      <fieldset className="wide study-editor">
+        <legend>Diagnóstico y diferenciales</legend>
+        <div className="inline-form">
+          <label>Nueva opción de diagnóstico<input maxLength={120} value={diagnosisLabel} onChange={(event) => setDiagnosisLabel(event.target.value)}/></label>
+          <button type="button" className="button secondary" disabled={busy || !diagnosisLabel.trim()} onClick={addDiagnosisChoice}>Agregar opción</button>
+        </div>
+        <p>Marca hasta dos alternativas que contarían como diferenciales. El diagnóstico principal se define en la rúbrica.</p>
+        {diagnosisChoices.filter((item) => item.id !== primaryDiagnosis).map((item) => {
+          const key = rubric.differentials ?? [];
+          const checked = key.includes(item.id);
+          return <label key={item.id} className="checkbox"><input type="checkbox" checked={checked} disabled={busy || (!checked && key.length >= 2)}
+            onChange={() => setRubric({ ...rubric, differentials: checked ? key.filter((id) => id !== item.id) : [...key, item.id] })}/>{item.label}</label>;
+        })}
+        <label>Hallazgo que distingue los diagnósticos<textarea rows={2} maxLength={400} value={rubric.differentialNote ?? ''}
+          onChange={(event) => setRubric({ ...rubric, differentialNote: event.target.value })}/></label>
+      </fieldset>
       <label className="wide">Escenario<textarea required maxLength={750} value={data.scenario} onChange={(event) => setData({ ...data, scenario: event.target.value })}/></label>
       <label className="wide">Frase inicial del familiar<textarea required maxLength={750} value={data.opening} onChange={(event) => setData({ ...data, opening: event.target.value })}/></label>
       <fieldset className="wide study-editor">

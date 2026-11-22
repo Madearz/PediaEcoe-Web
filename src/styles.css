@@ -157,6 +157,10 @@ textarea { resize: vertical; }
 .study-suggestions > p { font-size: .9rem; font-weight: 650; }
 .study-suggestions > small { color: var(--muted); }
 .study-case { color: var(--deep); font-size: .72rem; }
+.station-heading .pause-station { flex: 0 0 auto; margin-left: auto; }
+.differential-options { min-width: 0; border: 1px solid var(--border); border-radius: 10px; margin-top: .6rem; padding: .65rem; }
+.differential-options legend { font-weight: 650; padding: 0 .3rem; }
+.differential-options p { margin: 0 0 .55rem; }
 .study-editor { min-width: 0; display: grid; gap: .75rem; border: 1px solid var(--border); border-radius: 12px; padding: .75rem; }
 .study-editor legend { color: var(--deep); font-weight: 650; }
 .study-editor > button { justify-self: start; }
@@ -220,7 +224,7 @@ textarea { resize: vertical; }
   .dashboard-hero { grid-template-columns: 1fr; }
   .dashboard-hero img { max-height: 210px; }
   .phase { justify-content: flex-start; }
-  .station-heading { gap: .55rem; padding: .55rem .65rem; }
+  .station-heading { gap: .55rem; padding: .55rem .65rem; flex-wrap: wrap; }
   .scene { min-height: 235px; }
   .case-form { grid-template-columns: 1fr; }
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { Activity, Brain, CircleCheck, ClipboardList, Clock3, Droplets, Eye, FileText, HeartPulse, Mic, MicOff, Phone, PhoneOff, Send, Stethoscope, Volume2, VolumeX, Wind, type LucideIcon } from 'lucide-react';
+import { Activity, Bone, Brain, CircleCheck, ClipboardList, Clock3, Droplets, Ear, Eye, FileText, HeartPulse, Mic, MicOff, Pause, Phone, PhoneOff, Play, Send, Stethoscope, Volume2, VolumeX, Wind, type LucideIcon } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { collection, doc, getDocFromServer, getDocsFromServer, orderBy, query, where, limit } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
@@ -11,10 +11,14 @@ import { canListen, canSpeak, listenForQuestion, playSpeech, speak, useVoice } f
 import { createVoiceCall, type CallPhase, type CallState } from './voice-call';
 import { PHASES, SINGLE, STATION_MS, structured, type CaseData, type Grade, type Group, type Interaction } from '../shared/clinical.mjs';
 import { PATIENT_HISTORY_LIMIT } from '../shared/dialogue.mjs';
-import { EXAM_AREAS, examAreas, requestedExam, type ExamArea } from '../shared/exam.mjs';
+import { EXAM_AREAS, examAreas, requestedExam, systemExam, type ExamArea } from '../shared/exam.mjs';
 import { displayStoredStudy, MISSING_STUDY_VALUE, requestedStudies, studySuggestions, type StudyFinding } from '../shared/studies.mjs';
+import { FOLLOW_UP, JUSTIFICATION_LIMIT, registerAnamnesis, type FollowUp } from '../shared/learning.mjs';
 
-type Session = { id: string; index: number; complete: boolean; case: CaseData | null; caseIds?: string[]; titles: string[]; deadline: number | null; serverNow: number };
+type Evolution = { action: string; findings: string[] };
+type StationClock = { deadline: number; serverNow: number; pausedRemaining?: number | null };
+type Session = { id: string; index: number; complete: boolean; case: CaseData | null; caseIds?: string[]; titles: string[]; deadline: number | null; serverNow: number;
+  pausedRemaining?: number | null; hasEvolution?: boolean; evolution?: Evolution };
 type Turn = { question: string; reply: string; mode: 'structured'|'ai'; clinical?: boolean };
 type SupplementalFinding = StudyFinding & { group: 'exploracion'|'paraclinicos' };
 const turnLabel = (turn: Turn) => turn.clinical ? 'Resultado de la estación' : turn.mode === 'ai' ? 'IA generativa' : 'Respuesta estructurada';
@@ -28,19 +32,54 @@ const labels: Record<Group, string> = { anamnesis: 'Preguntas de anamnesis', exp
   paraclinicos: 'Paraclínicos', razonamiento: 'Decisión diagnóstica', acciones: 'Conducta inicial', cierre: 'Comunicación y cierre' };
 const examIcons: Record<ExamArea, LucideIcon> = {
   vitals: Activity, respiratory: Wind, cardiovascular: HeartPulse, abdomen: Droplets, neurological: Brain,
-  skin: Eye, other: Stethoscope,
+  skin: Eye, ent: Ear, musculoskeletal: Bone, other: Stethoscope,
 };
 
 function Station({ user, session, onSaved }: { user: User; session: Session; onSaved: (resultId: string) => void }) {
   const station = session.case!;
   const caseId = session.caseIds?.[session.index];
-  const deadline = session.deadline!;
   const storageKey = `pediaecoe:${user.uid}:${session.id}:${session.index}`;
+  function readDraft(key: string) {
+    try { return sessionStorage.getItem(storageKey + ':' + key) ?? ''; } catch { return ''; }
+  }
+  function saveDraft(key: string, value: string) {
+    try { sessionStorage.setItem(storageKey + ':' + key, value); } catch { /* The current station still works without storage. */ }
+  }
   const [selected, setSelected] = useState<string[]>(() => {
-    try { const saved = JSON.parse(sessionStorage.getItem(storageKey) ?? '[]'); return Array.isArray(saved) ? saved.filter((id) => station.interactions.some((item) => item.id === id)) : []; }
-    catch { return []; }
+    let saved: unknown;
+    try { saved = JSON.parse(sessionStorage.getItem(storageKey) ?? '[]'); } catch { /* Stored data may be unavailable. */ }
+    const locked = session.evolution?.action;
+    const retained = Array.isArray(saved) ? saved.filter((id) => station.interactions.some((item) => item.id === id
+      && (!locked || item.group !== 'acciones'))) : [];
+    return locked ? [...retained, locked] : retained;
   });
   const selectedRef = useRef(selected);
+  const [clockInfo, setClockInfo] = useState<StationClock>({
+    deadline: session.deadline!, serverNow: session.serverNow, pausedRemaining: session.pausedRemaining,
+  });
+  const [clockBusy, setClockBusy] = useState(false);
+  const paused = Boolean(clockInfo.pausedRemaining);
+  const clockPending = useRef(false);
+  const [evolution, setEvolution] = useState(session.evolution);
+  const [evolving, setEvolving] = useState(false);
+  const [followUp, setFollowUp] = useState<FollowUp | ''>(() => {
+    const saved = readDraft('followup');
+    return Object.hasOwn(FOLLOW_UP, saved) ? saved as FollowUp : '';
+  });
+  const [justification, setJustification] = useState(() => readDraft('justification').slice(0, JUSTIFICATION_LIMIT));
+  const [finishing, setFinishing] = useState(false);
+  const [differentials, setDifferentials] = useState<string[]>(() => {
+    try {
+      const saved: unknown = JSON.parse(readDraft('differentials'));
+      return Array.isArray(saved) ? saved.filter((id) => station.interactions.some((item) => item.group === 'razonamiento' && item.id === id)).slice(0, 2) : [];
+    } catch { return []; }
+  });
+  const [anamnesisEvidence] = useState<string[]>(() => {
+    try { const saved: unknown = JSON.parse(readDraft('anamnesis')); return Array.isArray(saved) ? saved.filter((value) => typeof value === 'string') : []; }
+    catch { return []; }
+  });
+  const evidence = useRef(anamnesisEvidence);
+  const [registered, setRegistered] = useState<string[]>([]);
   const [phase, setPhase] = useState(0);
   const [tool, setTool] = useState<Group>('exploracion');
   const [examArea, setExamArea] = useState<ExamArea | 'all'>('all');
@@ -50,7 +89,7 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
     ...item, areas: examAreas(item.label),
   })), [station.interactions]);
   const suggestedStudies = useMemo(() => studySuggestions(station, caseId), [station, caseId]);
-  const [time, setTime] = useState(() => Math.max(0, deadline - session.serverNow));
+  const [time, setTime] = useState(() => clockInfo.pausedRemaining ?? Math.max(0, clockInfo.deadline - clockInfo.serverNow));
   const [tab, setTab] = useState(false);
   const [turns, setTurns] = useState<Turn[]>([]);
   const transcript = useRef<Turn[]>([]);
@@ -62,6 +101,7 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
   const [saving, setSaving] = useState(false);
   const submitting = useRef(false);
   const expired = useRef(false);
+  const canInteract = !paused && !clockBusy && time > 0;
   const voice = useVoice(setText);
   const stopDictation = voice.stop;
   const latest = turns.at(-1);
@@ -81,7 +121,7 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
     if (canSpeak) window.speechSynthesis.cancel();
   }, [voiceCall]);
   const submit = useCallback(async () => {
-    if (submitting.current) return;
+    if (submitting.current || paused || clockPending.current) return;
     submitting.current = true;
     voiceCall.stop();
     stopDictation();
@@ -90,22 +130,48 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
     setSaving(true);
     setError('');
     try {
-      const { resultId } = await call<{ resultId: string }>(user, '/circuits/' + session.id + '/submit', { index: session.index, selections: selectedRef.current });
-      try { sessionStorage.removeItem(storageKey); } catch { /* Storage may be disabled. */ }
+      const principal = selectedRef.current.find((id) => station.interactions.some((item) => item.group === 'razonamiento' && item.id === id));
+      const { resultId } = await call<{ resultId: string }>(user, '/circuits/' + session.id + '/submit', {
+        index: session.index, selections: selectedRef.current, justification,
+        differentials: differentials.filter((id) => id !== principal),
+        ...(evolution && followUp ? { followUp } : {}),
+      });
+      try {
+        sessionStorage.removeItem(storageKey);
+        for (const key of ['justification', 'followup', 'differentials', 'anamnesis']) sessionStorage.removeItem(storageKey + ':' + key);
+      } catch { /* Storage may be disabled. */ }
       onSaved(resultId);
     } catch (failure) { setError(messageOf(failure)); }
     finally { submitting.current = false; setSaving(false); }
-  }, [onSaved, session.id, session.index, stopDictation, storageKey, user, voiceCall]);
+  }, [onSaved, session.id, session.index, stopDictation, storageKey, user, voiceCall, paused, justification, differentials, evolution, followUp, station.interactions]);
   useEffect(() => {
+    if (clockInfo.pausedRemaining) { setTime(clockInfo.pausedRemaining); return; }
     const baseline = performance.now();
-    const tick = () => setTime(Math.max(0, deadline - session.serverNow - (performance.now() - baseline)));
+    const tick = () => setTime(Math.max(0, clockInfo.deadline - clockInfo.serverNow - (performance.now() - baseline)));
+    tick();
     const timer = window.setInterval(tick, 200);
     document.addEventListener('visibilitychange', tick);
     return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', tick); };
-  }, [deadline, session.serverNow]);
+  }, [clockInfo]);
   useEffect(() => {
-    if (time <= 0 && !expired.current) { expired.current = true; void submit(); }
-  }, [time, submit]);
+    if (time <= 0 && !paused && !clockBusy && !expired.current) { expired.current = true; void submit(); }
+  }, [time, submit, paused, clockBusy]);
+  async function toggleClock() {
+    if (clockPending.current || submitting.current || evolving || (!paused && !time)) return;
+    clockPending.current = true;
+    setClockBusy(true);
+    setError('');
+    voiceCall.stop();
+    stopDictation();
+    textRequest.current?.abort();
+    if (canSpeak) window.speechSynthesis.cancel();
+    try {
+      const clock = await call<StationClock>(user, `/circuits/${session.id}/${paused ? 'resume' : 'pause'}`, { index: session.index });
+      setTime(clock.pausedRemaining ?? Math.max(0, clock.deadline - clock.serverNow));
+      setClockInfo(clock);
+    } catch (failure) { setError(messageOf(failure)); }
+    finally { clockPending.current = false; setClockBusy(false); }
+  }
   function recordSelections(ids: string[], replaceGroup?: Group) {
     const previous = replaceGroup ? selectedRef.current.filter((id) => station.interactions.find((option) => option.id === id)?.group !== replaceGroup) : selectedRef.current;
     const next = [...new Set([...previous, ...ids])];
@@ -114,8 +180,13 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
     try { sessionStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* Progress can still be submitted. */ }
   }
   function choose(item: Interaction) {
-    if (time <= 0 || submitting.current) return;
+    if (!canInteract || submitting.current || (item.group === 'acciones' && (evolution || evolving))) return;
     recordSelections([item.id], SINGLE.includes(item.group) ? item.group : undefined);
+    if (item.group === 'razonamiento' && differentials.includes(item.id)) {
+      const next = differentials.filter((id) => id !== item.id);
+      setDifferentials(next);
+      saveDraft('differentials', JSON.stringify(next));
+    }
     if (!item.reply) return;
     if (item.group === 'exploracion' || item.group === 'paraclinicos') {
       setLatestFinding(item.id);
@@ -125,12 +196,39 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
     addTurn({ question: item.label, reply: item.reply, mode: 'structured' });
     if (audio && !callActive && !voice.listening) speak(item.reply);
   }
+  function chooseSystem(area: ExamArea) {
+    if (!canInteract || submitting.current) return;
+    const result = systemExam(station, area);
+    setExamArea(area);
+    if (result.recorded.length) {
+      recordSelections(result.recorded.map(({ id }) => id));
+      setLatestFinding(result.recorded.at(-1)!.id);
+      return;
+    }
+    const finding: SupplementalFinding = { id: 'system:' + area, group: 'exploracion', label: EXAM_AREAS[area],
+      reply: result.reply || 'Este caso no incluye un hallazgo de este sistema.',
+      kind: result.reply ? 'simulated' : 'unavailable' };
+    setSupplemental((previous) => [finding, ...previous.filter((item) => item.id !== finding.id)]);
+    setLatestFinding(finding.id);
+  }
+  async function revealEvolution(action: string) {
+    if (!canInteract || saving || evolving || evolution) return;
+    setEvolving(true);
+    setError('');
+    try {
+      const next = await call<Evolution>(user, '/circuits/' + session.id + '/evolution', { index: session.index, action });
+      setEvolution(next);
+      recordSelections([next.action], 'acciones');
+    } catch (failure) { setError(messageOf(failure)); }
+    finally { setEvolving(false); }
+  }
   function addTurn(turn: Turn) {
     transcript.current = [...transcript.current.slice(-29), turn];
     setTurns(transcript.current);
   }
   async function requestAnswer(question: string, signal: AbortSignal) {
     signal.throwIfAborted();
+    if (!canInteract || submitting.current) throw new Error('La estación no está activa.');
     const studies = requestedStudies(station, question, caseId);
     const exam = requestedExam(station.interactions, question);
     if (studies || exam) {
@@ -167,13 +265,21 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
       answer = { mode: 'structured', reply: structured(station, question, history) };
     }
     signal.throwIfAborted();
+    const matched = registerAnamnesis(station.interactions, question, evidence.current);
+    evidence.current = matched.evidence;
+    saveDraft('anamnesis', JSON.stringify(matched.evidence));
+    const newlyRegistered = matched.registered.filter((id) => !selectedRef.current.includes(id));
+    if (newlyRegistered.length) {
+      recordSelections(newlyRegistered);
+      setRegistered(newlyRegistered);
+    }
     addTurn({ question, ...answer });
     return answer.reply;
   }
   async function ask(event: FormEvent) {
     event.preventDefault();
     const question = text.trim();
-    if (!question || textRequest.current || saving || !time || callActive || voice.listening) return;
+    if (!question || textRequest.current || saving || !canInteract || callActive || voice.listening) return;
     const request = new AbortController();
     textRequest.current = request;
     setSending(true);
@@ -190,7 +296,7 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
   }
   function toggleCall() {
     if (callActive) { voiceCall.stop(); return; }
-    if (!canListen || !canSpeak || !time || saving || textRequest.current) return;
+    if (!canListen || !canSpeak || !canInteract || saving || textRequest.current) return;
     stopDictation();
     window.speechSynthesis.cancel();
     setError('');
@@ -199,10 +305,12 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
   const totalSeconds = Math.ceil(time / 1000);
   const clock = [Math.floor(totalSeconds / 60), totalSeconds % 60].map((value) => String(value).padStart(2, '0')).join(':');
   const centralGroup = phases[phase][0];
+  const diagnosis = station.interactions.filter((item) => item.group === 'razonamiento');
+  const action = selected.find((id) => station.interactions.some((item) => item.id === id && item.group === 'acciones'));
   const toolOptions = tool === 'exploracion'
     ? examOptions.filter((item) => examArea === 'all' || item.areas.includes(examArea))
     : station.interactions.filter((item) => item.group === tool).map((item) => ({ ...displayStoredStudy(station, item), areas: [] }));
-  const availableAreas = (Object.keys(EXAM_AREAS) as ExamArea[]).filter((area) => examOptions.some((item) => item.areas.includes(area)));
+  const availableAreas = Object.keys(EXAM_AREAS) as ExamArea[];
   const recordedFindings = selected.map((id) => station.interactions.find((item) => item.id === id))
     .filter((item): item is Interaction => Boolean(item && (item.group === 'exploracion' || item.group === 'paraclinicos')))
     .reverse().map((item) => displayStoredStudy(station, item)).filter((item) => item.reply)
@@ -214,7 +322,12 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
       <button key={name} className={index === phase ? 'phase current' : 'phase'} aria-current={index === phase ? 'step' : undefined}
         onClick={() => { setPhase(index); if (index === 1) setTool('exploracion'); if (index === 3) setTool('acciones'); }}>
         <i>{index + 1}</i><span>{name}</span></button>)}</nav>
-    <div className="station-heading"><span className="station-icon"><Stethoscope size={25}/></span><h1>Estación {String(session.index + 1).padStart(2, '0')} <span>· {station.title}</span></h1><b className="pill">{station.difficulty}</b></div>
+    <div className="station-heading"><span className="station-icon"><Stethoscope size={25}/></span><h1>Estación {String(session.index + 1).padStart(2, '0')} <span>· {station.title}</span></h1><b className="pill">{station.difficulty}</b>
+      <button type="button" className="button secondary pause-station" disabled={saving || clockBusy || evolving || (!paused && !time)} onClick={() => void toggleClock()}>
+        {paused ? <><Play size={16}/> Reanudar</> : <><Pause size={16}/> Pausar estación</>}
+      </button>
+    </div>
+    {paused && <p className="notice" role="status">Estación en pausa. Tiempo restante {clock}.</p>}
     <div className="sim-grid">
       <section className="scene-panel">
         <div className="scene"><img src={scene} alt="Escena de consulta pediátrica" />
@@ -225,13 +338,13 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
         <div className="dialogue">
           <div className="voice-row">
             <button type="button" className={`button call-button ${callActive ? 'call-end' : 'primary'}`}
-              disabled={!canListen || !canSpeak || !time || sending || saving} onClick={toggleCall}>
+              disabled={!canListen || !canSpeak || !canInteract || sending || saving} onClick={toggleCall}>
               {callActive ? <><PhoneOff size={19}/> Colgar</> : <><Phone size={19}/> Iniciar llamada</>}
             </button>
             {callActive && <button type="button" className="button secondary" aria-pressed={callState.muted} onClick={voiceCall.toggleMute}>
               {callState.muted ? <><MicOff size={18}/> Reanudar micrófono</> : <><Mic size={18}/> Silenciar micrófono</>}
             </button>}
-            <button type="button" className="icon-button" disabled={!canSpeak || callActive || voice.listening}
+            <button type="button" className="icon-button" disabled={!canSpeak || !canInteract || callActive || voice.listening}
               title={audio ? 'Silenciar respuestas escritas' : 'Escuchar respuestas escritas'} aria-label={audio ? 'Silenciar respuestas escritas' : 'Escuchar respuestas escritas'} aria-pressed={audio}
               onClick={() => { setAudio(!audio); if (audio) window.speechSynthesis.cancel(); else speak(latest?.reply ?? station.opening); }}>{audio ? <Volume2/> : <VolumeX/>}</button>
             <button type="button" className="button secondary transcript" aria-expanded={tab} onClick={() => setTab(!tab)}><FileText size={17}/> Conversación</button>
@@ -247,14 +360,17 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
           <form className="ask" onSubmit={ask}>
             {voice.available && <button type="button" className="icon-button" aria-label={voice.listening ? 'Detener dictado' : 'Dictar en el campo de texto'}
               title={voice.listening ? 'Detener dictado' : 'Dictar en el campo de texto'} aria-pressed={voice.listening}
-              disabled={!time || callActive || sending || saving}
+              disabled={!canInteract || callActive || sending || saving}
               onClick={() => { if (canSpeak && !voice.listening) window.speechSynthesis.cancel(); voice.toggle(); }}>
               {voice.listening ? <MicOff size={18}/> : <Mic size={18}/>}
             </button>}
             <input aria-label="Pregunta al paciente o al familiar" placeholder={callActive ? 'Cuelga para enviar una pregunta escrita' : 'Ejemplo: ¿Qué los trae a consulta hoy?'}
-              maxLength={400} value={text} onChange={(event) => setText(event.target.value)}/>
-            <button className="button primary" aria-label="Enviar pregunta" disabled={!time || callActive || voice.listening || sending || saving || !text.trim()}><Send size={18}/></button>
+              maxLength={400} value={text} disabled={!canInteract} onChange={(event) => setText(event.target.value)}/>
+            <button className="button primary" aria-label="Enviar pregunta" disabled={!canInteract || callActive || voice.listening || sending || saving || !text.trim()}><Send size={18}/></button>
           </form>
+          {registered.length > 0 && <p className="notice" role="status">
+            Anamnesis registrada · {station.interactions.filter(({ id }) => registered.includes(id)).map(({ label }) => label).join(' · ')}
+          </p>}
           {tab && <div className="transcript-list">{!turns.length ? <span>Aún no has hecho preguntas.</span> : turns.map((turn, index) => <div key={index}><b>{turn.question}</b><p>{turn.reply}</p><small>{turnLabel(turn)}</small></div>)}</div>}
         </div>
       </section>
@@ -262,26 +378,27 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
         {(['exploracion', 'paraclinicos', 'acciones'] as const).map((key) =>
           <button key={key} className={key === tool ? 'active' : ''} aria-pressed={key === tool} onClick={() => setTool(key)}>
             {key === 'acciones' ? 'Acciones' : labels[key]}</button>)}</div>
-        {tool === 'exploracion' && availableAreas.length > 1 && <div className="exam-areas" role="group" aria-label="Sistemas del examen físico">
+        {tool === 'exploracion' && <div className="exam-areas" role="group" aria-label="Sistemas del examen físico">
           <button type="button" aria-pressed={examArea === 'all'} onClick={() => setExamArea('all')}>Todos</button>
-          {availableAreas.map((area) => <button type="button" key={area} aria-pressed={examArea === area}
-            onClick={() => setExamArea(area)}>{EXAM_AREAS[area]}</button>)}
+          {availableAreas.map((area) => <button type="button" key={area} aria-pressed={examArea === area} disabled={!canInteract || saving}
+            onClick={() => chooseSystem(area)}>{EXAM_AREAS[area]}</button>)}
         </div>}
         <div className="tool-buttons">{toolOptions.map((item) => {
           const area = examArea === 'all' ? item.areas[0] : examArea;
           const ToolIcon = tool === 'paraclinicos' ? ClipboardList : tool === 'acciones' ? HeartPulse : examIcons[area ?? 'other'];
           const requested = selected.includes(item.id);
-          return <button key={item.id} aria-pressed={requested} disabled={saving || !time} onClick={() => choose(item)}>
+          return <button key={item.id} aria-pressed={requested} disabled={saving || !canInteract || (tool === 'acciones' && Boolean(evolution || evolving))} onClick={() => choose(item)}>
             <ToolIcon size={24} aria-hidden="true"/><span>{item.label}</span>
             {requested && <small><CircleCheck size={14} aria-hidden="true"/>{tool === 'acciones' ? 'Seleccionada' : 'Solicitado'}</small>}
           </button>;
         })}
-          {!toolOptions.length && tool !== 'paraclinicos' && <p>{`Este caso no incluye ${tool === 'exploracion' ? 'hallazgos de examen físico' : 'acciones'} en esta sección.`}</p>}</div>
+          {!toolOptions.length && (tool === 'acciones' || (tool === 'exploracion' && examArea === 'all')) &&
+            <p>Selecciona un sistema para consultar sus hallazgos.</p>}</div>
         {tool === 'paraclinicos' && <div className="study-suggestions">
           {suggestedStudies.length > 0 && <>
             <p>Ejemplos de paraclínicos</p>
             <div className="option-list">{suggestedStudies.map((study) => <button type="button" key={study.id}
-              className="button secondary" aria-label={`Solicitar ${study.label}`} disabled={saving || !time} onClick={() => {
+              className="button secondary" aria-label={`Solicitar ${study.label}`} disabled={saving || !canInteract} onClick={() => {
                 void requestAnswer(`Solicito ${study.label}`, new AbortController().signal)
                   .catch((failure) => setError(messageOf(failure)));
               }}>{study.label}
@@ -299,17 +416,57 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
         </div>
       </aside>
     </div>
-    <section className="card station-options"><h2><Brain size={21}/> {labels[centralGroup]}</h2><p>{phase === 0 ? station.scenario : 'Selecciona y registra tus decisiones durante la estación.'}</p>
+    <section className="card station-options"><h2><Brain size={21}/> {phase === 2 ? 'Diagnóstico principal' : labels[centralGroup]}</h2><p>{phase === 0 ? station.scenario : 'Selecciona y registra tus decisiones durante la estación.'}</p>
       {phase === 1 ? <button type="button" className="button secondary" onClick={() => {
         setTool('exploracion');
         document.getElementById('station-clinical-tools')?.focus();
       }}>Ir a exploración física</button> :
         <div className="option-list">{station.interactions.filter((item) => item.group === centralGroup).map((item) =>
-          <button key={item.id} className={'button secondary ' + (selected.includes(item.id) ? 'picked' : '')} aria-pressed={selected.includes(item.id)} disabled={saving || !time} onClick={() => choose(item)}>{item.label}</button>)}</div>}
+          <button key={item.id} className={'button secondary ' + (selected.includes(item.id) ? 'picked' : '')} aria-pressed={selected.includes(item.id)}
+            disabled={saving || !canInteract || (centralGroup === 'acciones' && Boolean(evolution || evolving))} onClick={() => choose(item)}>{item.label}</button>)}</div>}
+      {phase === 2 && <fieldset className="differential-options">
+        <legend>Diagnósticos diferenciales</legend>
+        <p>Considera hasta dos alternativas distintas del diagnóstico principal.</p>
+        <div className="option-list">{diagnosis.filter((item) => !selected.includes(item.id)).map((item) => {
+          const checked = differentials.includes(item.id);
+          return <button type="button" key={item.id} className={'button secondary ' + (checked ? 'picked' : '')} aria-pressed={checked}
+            disabled={!canInteract || saving || (!checked && differentials.length >= 2)} onClick={() => {
+              const next = checked ? differentials.filter((id) => id !== item.id) : [...differentials, item.id];
+              setDifferentials(next);
+              saveDraft('differentials', JSON.stringify(next));
+            }}>{item.label}</button>;
+        })}</div>
+      </fieldset>}
     </section>
+    {session.hasEvolution && (action || evolution) && <section className="card station-options">
+      <h2><Activity size={21}/> Evolución del paciente</h2>
+      {evolution ? <>
+        <ul>{evolution.findings.map((finding, index) => <li key={index}>{finding}</li>)}</ul>
+        <fieldset className="differential-options"><legend>¿Qué harías después?</legend>
+          <div className="option-list">{(Object.keys(FOLLOW_UP) as FollowUp[]).map((decision) => <button type="button" key={decision}
+            className={'button secondary ' + (followUp === decision ? 'picked' : '')} aria-pressed={followUp === decision}
+            disabled={saving || !canInteract} onClick={() => { setFollowUp(decision); saveDraft('followup', decision); }}>{FOLLOW_UP[decision]}</button>)}</div>
+        </fieldset>
+      </> : <>
+        <p>Al consultar la evolución se confirma la conducta seleccionada.</p>
+        <button type="button" className="button secondary" disabled={saving || evolving || !canInteract || !action}
+          onClick={() => { if (action) void revealEvolution(action); }}>{evolving ? 'Cargando…' : 'Consultar evolución'}</button>
+      </>}
+    </section>}
+    {finishing && <section className="card station-options">
+      <h2><FileText size={21}/> Justificación clínica</h2>
+      <label htmlFor="station-justification">¿Qué hallazgo apoya tu diagnóstico y ayuda a distinguirlo de tus diferenciales?</label>
+      <textarea id="station-justification" rows={3} value={justification} maxLength={JUSTIFICATION_LIMIT} disabled={!canInteract || saving}
+        onChange={(event) => { setJustification(event.target.value); saveDraft('justification', event.target.value); }}/>
+      <small>Opcional. Se mostrará junto a la retroalimentación.</small>
+    </section>}
     {error && <p className="notice error" role="alert">{error}</p>}
     <footer className="station-footer"><span><ClipboardList size={20}/> {session.index + 1} de 3 · Evaluación sobre 100</span>
-      <button className="button primary" disabled={saving} onClick={() => void submit()}>{saving ? 'Guardando…' : 'Finalizar estación'}</button></footer>
+      {finishing && <button type="button" className="button secondary" disabled={saving} onClick={() => setFinishing(false)}>Volver a la estación</button>}
+      <button className="button primary" disabled={saving || paused || clockBusy || evolving} onClick={() => {
+        if (finishing) void submit();
+        else { voiceCall.stop(); stopDictation(); textRequest.current?.abort(); setFinishing(true); }
+      }}>{saving ? 'Guardando…' : finishing ? 'Guardar y finalizar' : 'Finalizar estación'}</button></footer>
   </main>;
 }
 function BriefIcon() { return <span className="clinical-icon"><HeartPulse size={18}/></span>; }

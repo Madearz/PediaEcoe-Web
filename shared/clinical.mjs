@@ -27,6 +27,7 @@ export function validCase(data, rubric) {
       || (data.studyResults !== undefined && !validStudyResults(data.studyResults))
       || !Array.isArray(data.interactions) || data.interactions.length < 5 || data.interactions.length > 35
       || !short(rubric.diagnosis, 200) || !short(rubric.reference, 300)
+      || (rubric.differentialNote !== undefined && rubric.differentialNote !== '' && !short(rubric.differentialNote, 400))
       || !Array.isArray(rubric.criteria) || rubric.criteria.length > 35
       || !Array.isArray(rubric.critical) || rubric.critical.length > 12) return false;
   const options = new Map();
@@ -53,6 +54,10 @@ export function validCase(data, rubric) {
     if (rubric.criteria.filter((criterion) => criterion.domain === index + 2).length !== 1
       || data.interactions.filter((item) => item.group === group).length < 2) return false;
   }
+  if (rubric.differentials !== undefined && (!Array.isArray(rubric.differentials) || rubric.differentials.length > 2
+      || new Set(rubric.differentials).size !== rubric.differentials.length
+      || rubric.differentials.some((id) => options.get(id)?.group !== 'razonamiento'
+        || rubric.criteria.some((item) => item.domain === 2 && item.id === id)))) return false;
   return points.every((total, index) => total === DOMAINS[index]) && rubric.critical.every(
     (error) => error && options.has(error.id) && !used.has(error.id) && short(error.tip, 260)
   );
@@ -71,7 +76,7 @@ export function validAnswers(data, selections) {
   return true;
 }
 
-export function grade(data, rubric, selections) {
+export function grade(data, rubric, selections, differentials = []) {
   const selected = new Set(selections);
   const domains = [0, 0, 0, 0, 0];
   const feedback = rubric.criteria.map((item) => {
@@ -80,11 +85,21 @@ export function grade(data, rubric, selections) {
     return { label: data.interactions.find((interaction) => interaction.id === item.id).label, earned, tip: item.tip, domain: item.domain };
   });
   const critical = rubric.critical.filter((item) => selected.has(item.id)).map((item) => item.tip);
-  const score = domains.reduce((total, value) => total + value, 0);
   const errors = data.interactions.filter((item) => selected.has(item.id) && SINGLE.includes(item.group)
     && !rubric.criteria.some((criterion) => criterion.id === item.id)).map((item) => item.label);
+  const names = (ids) => ids.map((id) => data.interactions.find((item) => item.id === id)?.label).filter(Boolean);
+  const expectedDifferentials = rubric.differentials ?? [];
+  if (expectedDifferentials.length) {
+    const matched = differentials.filter((id) => expectedDifferentials.includes(id)).length;
+    domains[2] = (domains[2] > 0 ? 14 : 0) + 6 * matched / expectedDifferentials.length;
+  }
+  const score = domains.reduce((total, value) => total + value, 0);
   return { title: data.title, score, domains, feedback, critical, errors, passed: score >= 70 && critical.length === 0,
-    diagnosis: rubric.diagnosis, reference: rubric.reference };
+    diagnosis: rubric.diagnosis, reference: rubric.reference,
+    ...(differentials.length || expectedDifferentials.length ? {
+      differentials: { chosen: names(differentials), expected: names(expectedDifferentials),
+        ...(rubric.differentialNote ? { note: rubric.differentialNote } : {}) },
+    } : {}) };
 }
 
 export function normalizeEmail(input) {

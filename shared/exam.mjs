@@ -5,6 +5,8 @@ export const EXAM_AREAS = {
   abdomen: 'Abdomen e hidratación',
   neurological: 'Neurológico',
   skin: 'Piel y mucosas',
+  ent: 'Oídos, nariz y garganta',
+  musculoskeletal: 'Musculoesquelético',
   other: 'Otros hallazgos',
 };
 
@@ -15,6 +17,8 @@ const patterns = {
   abdomen: /abdom|hepat|esplen|hidrat|tolerancia oral|diuresis|deposicion|higado|sangrado digestivo/,
   neurological: /neurolog|conciencia|estado mental|focalidad|meninge|reflejo|tono muscular|alerta|glasgow|pupila/,
   skin: /piel|mucosa|exantema|erupcion|petequia|lesion cutanea|coloracion|dermat|placas/,
+  ent: /oidos?|nariz|garganta|otoscop|timpan|orofaring|amigdal|mastoide/,
+  musculoskeletal: /musculoesquelet|articul|extremidad|deambula|marcha|movilidad|deformidad/,
 };
 
 export const normalizeClinicalRequest = (text) => text.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase()
@@ -60,4 +64,38 @@ export function requestedExam(interactions, question) {
     return exams.filter((item) => examAreas(item.label + ' ' + item.reply).some((area) => areas.some((requested) => requested === area)));
   }
   return examPrompt.test(text) || /\b(examino|exploro|examinarlo|explorarlo)\b/.test(text) ? exams : [];
+}
+
+const systemExamples = {
+  respiratory: 'Expansión simétrica, murmullo vesicular bilateral y sin tiraje.',
+  cardiovascular: 'Pulsos periféricos palpables y llenado capilar de 2 segundos.',
+  abdomen: 'Abdomen blando, sin defensa a la palpación; mucosas húmedas.',
+  neurological: 'Alerta, responde a la interacción y mueve las cuatro extremidades de forma simétrica.',
+  skin: 'Piel íntegra y sin lesiones visibles en la inspección.',
+  ent: 'Tímpanos visibles sin abombamiento y orofaringe sin exudado.',
+  musculoskeletal: 'Movilidad espontánea simétrica, sin aumento de volumen articular visible.',
+};
+const clinicalClues = {
+  respiratory: /respir|pulmon|tos\b|asma|bronqui|estridor|disnea|satura|cianosis|via aerea/,
+  cardiovascular: /perfusion|choque|shock|cardiac|cardiov|taquicardia|hipovolem|frialdad|dedos frios|corazon|deshidrat|sepsis/,
+  abdomen: /dolor|abdom|diarrea|vomit|deshidrat|hepat|icteri|orina|renal|nutri|diges|deposiciones/,
+  neurological: /convuls|neuro|mening|somnolen|conciencia|letarg|confus|alerta|glucemia|hipoglu|intoxic/,
+  skin: /piel|erupcion|exantema|petequi|prurito|urtic|dermat|herid|quemad|palidez|icteri/,
+  ent: /oido|nariz|garganta|otit|faring|amigda|nasal|ronqu|estridor|disfagia/,
+  musculoskeletal: /articul|artrit|miembro|muscul|marcha|cojera|fractura|trauma|deformidad|debilidad/,
+};
+
+export function systemExam(data, area) {
+  const interactions = data.interactions.filter((item) => item.group === 'exploracion' && item.reply);
+  const recorded = interactions.filter((item) => examAreas(item.label + ' ' + item.reply).includes(area));
+  if (recorded.length) return { recorded, reply: '' };
+  const context = normalizeClinicalRequest([data.title, data.scenario, data.opening,
+    ...data.interactions.filter((item) => item.group === 'anamnesis').map((item) => item.label + ' ' + item.reply)].join(' '));
+  if (area === 'vitals') {
+    const age = Number(context.match(/\b(?:de )?(\d+) anos?\b/)?.[1]);
+    const relevant = /fiebre|febril|respir|choque|sepsis|deshidrat|hipoterm|presion|taqui|bradi/.test(context);
+    return { recorded, reply: age >= 5 && age <= 12 && !relevant
+      ? 'FC 90/min; FR 20/min; temperatura 36,8 °C; SpO₂ 98 % al aire ambiente.' : '' };
+  }
+  return { recorded, reply: clinicalClues[area]?.test(context) ? '' : systemExamples[area] ?? '' };
 }

@@ -2,6 +2,8 @@ import { ApiError, firestore, verifyGoogleToken } from './firebase.mjs';
 import { DAILY_CIRCUITS_DEFAULT, DAILY_CIRCUITS_MAX, grade, normalizeEmail, STATION_MS, structured, validAnswers, validCase, validId } from '../shared/clinical.mjs';
 import { PATIENT_HISTORY_LIMIT, patientAge, patientBackgroundReply, socialReply } from '../shared/dialogue.mjs';
 import { reviewFacts, reviewReply } from '../shared/review.mjs';
+import { FOLLOW_UP, JUSTIFICATION_LIMIT } from '../shared/learning.mjs';
+import { addDiagnosticChoices, evolutions } from './evolutions.mjs';
 
 const limits = { start: [DAILY_CIRCUITS_DEFAULT, 350], dialogue: [24, 800], messages: [40, 2000] };
 const validCircuitLimit = (value) => Number.isInteger(value) && value >= DAILY_CIRCUITS_DEFAULT && value <= DAILY_CIRCUITS_MAX;
@@ -113,7 +115,7 @@ async function newCircuit(db, env, identity, invitation, requested) {
       if (data.data.status !== 'published') return null;
       const rubric = await db.get('case_rubrics/' + id, true);
       if (!validCase(data.data, rubric.data)) return null;
-      return { public: data.data, rubric: rubric.data };
+      return addDiagnosticChoices(id, data.data, rubric.data, shuffle);
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) return null;
       throw error;
@@ -156,8 +158,52 @@ async function ownSession(db, id, uid) {
   return document;
 }
 
+function evolutionFor(data) {
+  const id = data.caseIds?.[data.index];
+  return id && Object.hasOwn(evolutions, id) ? evolutions[id] : null;
+}
+
+function outcome(preset, rubric, action) {
+  return rubric.criteria.some((criterion) => criterion.domain === 3 && criterion.id === action)
+    ? preset.indicated : preset.alternative;
+}
+
+async function evolve(db, invitation, session, id, params) {
+  permittedShape(params, ['index', 'action']);
+  const { data, updateTime } = session;
+  const preset = evolutionFor(data);
+  if (!preset || data.complete || params.index !== data.index || !data.deadline || data.pausedRemaining || Date.now() > data.deadline) {
+    throw new ApiError(409, 'La evolución no está disponible en esta estación.');
+  }
+  if (data.evolution) {
+    if (data.evolution.action !== params.action) throw new ApiError(409, 'La conducta de esta evolución ya se registró.');
+    return data.evolution;
+  }
+  const { public: currentCase, rubric } = (await db.get('private_sessions/' + id, true)).data.cases[data.index];
+  if (!currentCase.interactions.some((item) => item.group === 'acciones' && item.id === params.action)) {
+    throw new ApiError(400, 'Selecciona una conducta válida.');
+  }
+  const evolution = { action: params.action, findings: outcome(preset, rubric, params.action).findings };
+  await db.commit([db.write('simulation_sessions/' + id, { ...data, evolution, createdAt: new Date(data.createdAt) }, { updateTime })], invitation);
+  return evolution;
+}
+
+async function changeClock(db, invitation, session, id, params, action) {
+  permittedShape(params, ['index']);
+  const { data, updateTime } = session;
+  if (data.complete || params.index !== data.index || !data.deadline) throw new ApiError(409, 'La estación no está activa.');
+  const now = Date.now();
+  const { pausedRemaining, ...active } = data;
+  if (action === 'pause' && !pausedRemaining && now >= data.deadline) throw new ApiError(409, 'Ya terminó el tiempo de la estación.');
+  let next = data;
+  if (action === 'pause' && !pausedRemaining) next = { ...active, pausedRemaining: data.deadline - now };
+  if (action === 'resume' && pausedRemaining) next = { ...active, deadline: now + pausedRemaining };
+  if (next !== data) await db.commit([db.write('simulation_sessions/' + id, { ...next, createdAt: new Date(data.createdAt) }, { updateTime })], invitation);
+  return { deadline: next.deadline, pausedRemaining: next.pausedRemaining ?? null, serverNow: now };
+}
+
 async function submit(db, invitation, session, id, params) {
-  permittedShape(params, ['index', 'selections']);
+  permittedShape(params, ['index', 'selections', 'justification', 'followUp', 'differentials']);
   if (!Number.isInteger(params.index) || params.index < 0 || params.index > 2) {
     throw new ApiError(400, 'Estación inválida.');
   }
@@ -167,16 +213,43 @@ async function submit(db, invitation, session, id, params) {
     await db.get('station_results/' + resultId);
     return { resultId };
   }
-  if (params.index !== data.index || !data.deadline || data.complete) {
+  if (params.index !== data.index || !data.deadline || data.complete || data.pausedRemaining) {
     throw new ApiError(409, 'Esta estación aún no está activa.');
+  }
+  if (params.justification !== undefined && (typeof params.justification !== 'string' || params.justification.length > JUSTIFICATION_LIMIT)) {
+    throw new ApiError(400, 'La justificación supera el tamaño permitido.');
+  }
+  if (params.followUp !== undefined && (!data.evolution || typeof params.followUp !== 'string' || !Object.hasOwn(FOLLOW_UP, params.followUp))) {
+    throw new ApiError(400, 'Selecciona una decisión de seguimiento válida.');
   }
   const { public: currentCase, rubric } = (await db.get('private_sessions/' + id, true)).data.cases[data.index];
   if (!validAnswers(currentCase, params.selections)) throw new ApiError(400, 'Las selecciones no son válidas.');
+  const diagnoses = new Set(currentCase.interactions.filter((item) => item.group === 'razonamiento').map(({ id }) => id));
+  const differentials = params.differentials ?? [];
+  if (!Array.isArray(differentials) || differentials.length > 2 || new Set(differentials).size !== differentials.length
+      || differentials.some((item) => !diagnoses.has(item) || params.selections.includes(item))) {
+    throw new ApiError(400, 'Elige hasta dos diferenciales distintos del diagnóstico principal.');
+  }
   // A short delivery grace accommodates transport latency after the visible deadline.
-  const selections = Date.now() <= data.deadline + 8000 ? params.selections : [];
-  const gradeData = grade(currentCase, rubric, selections);
-  const next = { ...data, createdAt: new Date(data.createdAt), index: data.index + 1, deadline: null, complete: data.index === 2 };
-  const result = { ...gradeData, uid: data.uid, sessionId: id, station: data.index, createdAt: new Date() };
+  const inTime = Date.now() <= data.deadline + 8000;
+  const { evolution, ...sessionData } = data;
+  const lockedAction = evolution?.action;
+  const otherActions = new Set(currentCase.interactions.filter((item) => item.group === 'acciones').map(({ id }) => id));
+  const submitted = inTime ? params.selections : [];
+  const selections = lockedAction ? [...submitted.filter((id) => !otherActions.has(id)), lockedAction] : submitted;
+  const gradeData = grade(currentCase, rubric, selections, inTime ? differentials : []);
+  const next = { ...sessionData, createdAt: new Date(data.createdAt), index: data.index + 1, deadline: null, complete: data.index === 2 };
+  const justification = inTime && params.justification?.trim();
+  const preset = evolutionFor(data);
+  const result = { ...gradeData, uid: data.uid, sessionId: id, station: data.index, createdAt: new Date(),
+    category: currentCase.category, ...(data.caseIds?.[data.index] ? { caseId: data.caseIds[data.index] } : {}),
+    ...(currentCase.curricularGroups ? { curricularGroups: currentCase.curricularGroups } : {}),
+    ...(justification ? { justification } : {}),
+    ...(lockedAction && preset ? { followUp: {
+      expected: FOLLOW_UP[outcome(preset, rubric, lockedAction).next],
+      ...(inTime && params.followUp ? { chosen: FOLLOW_UP[params.followUp] } : {}),
+    } } : {}),
+  };
   await db.commit([
     db.write('simulation_sessions/' + id, next, { updateTime }),
     db.write('station_results/' + resultId, result, { exists: false }),
@@ -336,7 +409,7 @@ export function createHandler({ verify = verifyGoogleToken, database = firestore
       if (path === '/admin/circuit-limits' && ['GET', 'POST'].includes(request.method)) {
         return await adminCircuitLimits(request, db, env, identity, headers);
       }
-      const many = /^\/circuits\/([a-z0-9_-]+)(?:\/(next|submit|dialogue))?$/.exec(path);
+      const many = /^\/circuits\/([a-z0-9_-]+)(?:\/(next|submit|dialogue|evolution|pause|resume))?$/.exec(path);
       if (path === '/access' && request.method === 'GET') return Response.json({ active: true }, { headers });
       const reviewRoute = /^\/reviews\/([a-z0-9_-]{1,64})$/.exec(path);
       if (reviewRoute && request.method === 'POST') {
@@ -357,10 +430,14 @@ export function createHandler({ verify = verifyGoogleToken, database = firestore
       const { data, updateTime } = session;
       if (!action) {
         const snapshot = data.complete ? null : (await db.get('private_sessions/' + id, true)).data.cases[data.index].public;
-        return Response.json({ id, ...data, case: snapshot, serverNow: Date.now() }, { headers });
+        return Response.json({ id, ...data, case: snapshot, hasEvolution: Boolean(evolutionFor(data)), serverNow: Date.now() }, { headers });
       }
       const body = await bodyOf(request, action === 'dialogue' ? 20000 : undefined);
       if (action === 'submit') return Response.json(await submit(db, invitation, session, id, body), { headers });
+      if (action === 'evolution') return Response.json(await evolve(db, invitation, session, id, body), { headers });
+      if (action === 'pause' || action === 'resume') {
+        return Response.json(await changeClock(db, invitation, session, id, body, action), { headers });
+      }
       if (action === 'next') {
         permittedShape(body, []);
         if (data.complete) throw new ApiError(409, 'El circuito ya finalizó.');
@@ -373,7 +450,7 @@ export function createHandler({ verify = verifyGoogleToken, database = firestore
       permittedShape(body, ['question', 'history', 'index']);
       const question = readQuestion(body.question);
       const history = readHistory(body.history, PATIENT_HISTORY_LIMIT);
-      if (!data.deadline || data.deadline < Date.now() || data.complete
+      if (!data.deadline || data.deadline < Date.now() || data.complete || data.pausedRemaining
         || (Object.hasOwn(body, 'index') && body.index !== data.index)) {
         throw new ApiError(409, 'La estación no está activa.');
       }
