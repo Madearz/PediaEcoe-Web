@@ -157,6 +157,14 @@ textarea { resize: vertical; }
 .study-suggestions > p { font-size: .9rem; font-weight: 650; }
 .study-suggestions > small { color: var(--muted); }
 .study-case { color: var(--deep); font-size: .72rem; }
+.study-editor { min-width: 0; display: grid; gap: .75rem; border: 1px solid var(--border); border-radius: 12px; padding: .75rem; }
+.study-editor legend { color: var(--deep); font-weight: 650; }
+.study-editor > button { justify-self: start; }
+.study-editor-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); align-items: end; gap: .5rem; }
+.study-editor details summary { cursor: pointer; }
+.study-existing { list-style: none; margin: .4rem 0 0; padding: 0; }
+.study-existing li { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem; padding: .5rem 0; border-bottom: 1px solid var(--border); }
+.study-existing small { display: block; color: var(--muted); }
 .findings { background: #f2f0fc; border: 1px solid var(--border); border-radius: 13px; margin-top: .8rem; padding: .75rem; }
 .findings p { margin-top: .45rem; font-size: .91rem; }
 .findings-list { list-style: none; display: grid; gap: .45rem; margin: .55rem 0 0; padding: 0; }

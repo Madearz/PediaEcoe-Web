@@ -1,4 +1,5 @@
 import { normalizeClinicalRequest } from './exam.mjs';
+import { measuredExample } from './study-measurements.mjs';
 
 const renal = /renal|nefro|diuresis|urinari|orina|hematuria|oliguria|enuresis|deshidrat|edema/;
 const metabolic = /diabetes|gluc|metabol|cetona|deshidrat|somnolen|ayuno|convulsion|conciencia|intoxic|neonat|recien nacido/;
@@ -12,62 +13,62 @@ const neurological = /neuro|cefalea|convulsion|focalidad|trauma|encefal|concienc
 const studies = [
   { id: 'hemograma', label: 'Hemograma', aliases: /(?:hemograma|cuadro hematico|biometria hematica|conteo sanguineo)/,
     related: [fever, anemia, /petequia|purpura|neumon/],
-    normal: 'Hemoglobina, leucocitos y plaquetas dentro de los intervalos esperados para la edad.' },
+    normal: 'Hemoglobina 12,5 g/dL; leucocitos 8.000/µL; plaquetas 250.000/µL.' },
   { id: 'hemoglobina', label: 'Hemoglobina', aliases: /(?:hemoglobina|hb)/,
-    related: [anemia], normal: 'Hemoglobina dentro del intervalo esperado para la edad.' },
+    related: [anemia], normal: 'Hemoglobina 12,5 g/dL.' },
   { id: 'vcm', label: 'Volumen corpuscular medio', aliases: /(?:volumen corpuscular medio|vcm)/,
-    related: [anemia], normal: 'Volumen corpuscular medio dentro del intervalo esperado para la edad.' },
+    related: [anemia], normal: 'VCM 82 fL.' },
   { id: 'ferritina', label: 'Ferritina', aliases: /(?:ferritina|perfil de hierro)/,
-    related: [anemia, fever], normal: 'Ferritina dentro del intervalo de referencia del laboratorio.' },
+    related: [anemia, fever], normal: 'Ferritina 35 ng/mL.' },
   { id: 'hematocrito', label: 'Hematocrito', aliases: /(?:hematocrito|hto)/,
-    related: [anemia, /dengue|choque|deshidrat/], normal: 'Hematocrito dentro del intervalo esperado para la edad.' },
+    related: [anemia, /dengue|choque|deshidrat/], normal: 'Hematocrito 37 %.' },
   { id: 'plaquetas', label: 'Plaquetas', aliases: /(?:plaquetas|recuento plaquetario)/,
     related: [anemia, fever, /petequia|purpura|coagul|trombocit/], normal: 'Plaquetas 250.000/µL.' },
   { id: 'reticulocitos', label: 'Reticulocitos', aliases: /reticulocitos/,
-    related: [anemia, /aplas|hemoli/], normal: 'Recuento de reticulocitos dentro del intervalo esperado para la edad.' },
+    related: [anemia, /aplas|hemoli/], normal: 'Reticulocitos 1,2 %.' },
   { id: 'glucosa', label: 'Glucosa', aliases: /(?:glucemia|glicemia|glucometria|glucosa)/,
     related: [metabolic], normal: 'Glucosa 90 mg/dL.' },
   { id: 'cetonas', label: 'Cetonas', aliases: /(?:cetonas|cetonemia|cetonuria|cuerpos cetonicos)/,
-    related: [metabolic], normal: 'Sin cetonas elevadas en la muestra simulada.' },
+    related: [metabolic], normal: 'Cetonas 0,2 mmol/L.' },
   { id: 'sodio', label: 'Sodio', aliases: /sodio/, related: [renal, electrolytes], normal: 'Sodio 140 mmol/L.' },
   { id: 'potasio', label: 'Potasio', aliases: /potasio/, related: [renal, electrolytes], normal: 'Potasio 4,2 mmol/L.' },
   { id: 'electrolitos', label: 'Electrolitos', aliases: /(?:electrolitos|ionograma)/, related: [renal, electrolytes],
     normal: 'Sodio 140 mmol/L y potasio 4,2 mmol/L.' },
   { id: 'creatinina', label: 'Creatinina', aliases: /(?:creatinina|perfil renal|funcion renal)/, related: [renal, /choque|hipertension|intoxic/],
-    normal: 'Creatinina dentro del intervalo de referencia para la edad.' },
+    normal: null },
   { id: 'hepatica', label: 'Perfil hepático', aliases: /(?:perfil hepatico|funcion hepatica|transaminasas|ast y alt|pruebas hepaticas)/,
     related: [/hepat|icter|bilirrub|paracetamol|intoxic|choque|neonat|recien nacido/],
-    normal: 'Transaminasas y bilirrubina dentro de los intervalos esperados para la edad.' },
+    normal: null },
   { id: 'bilirrubina', label: 'Bilirrubina', aliases: /(?:bilirrubina(?: total| directa| indirecta| fraccionada)?)/,
-    related: [/hepat|icter|bilirrub|hemoli|neonat|recien nacido/], normal: 'Bilirrubina dentro del intervalo esperado para la edad.' },
+    related: [/hepat|icter|bilirrub|hemoli|neonat|recien nacido/], normal: 'Bilirrubina total 0,6 mg/dL.' },
   { id: 'albumina', label: 'Albúmina', aliases: /albumina/, related: [renal, /hepat|albumin|desnutri/],
-    normal: 'Albúmina dentro del intervalo de referencia.' },
+    normal: 'Albúmina 4,1 g/dL.' },
   { id: 'coagulacion', label: 'Pruebas de coagulación', aliases: /(?:(?:pruebas? de |perfil de )?coagulacion|coagulograma|inr)/,
     related: [/sangrad|hemorrag|coagul|petequia|purpura|hepat|sepsis|trauma/],
-    normal: 'Tiempo de protrombina y tiempo de tromboplastina parcial dentro de los intervalos de referencia.' },
+    normal: 'Tiempo de protrombina 12,5 s; TTPa 30 s.' },
   { id: 'gasometria', label: 'Gasometría', aliases: /(?:gasometria(?: arterial| venosa)?|gases (?:arteriales|venosos))/,
     related: [chest, metabolic, /choque|acidosis|hipoperfusion/],
-    normal: 'pH y bicarbonato dentro del intervalo esperado para el tipo de muestra.' },
+    normal: null },
   { id: 'orina', label: 'Análisis de orina', aliases: /(?:uroanalisis|parcial de orina|analisis de orina|examen de orina|examen general de orina|tira de orina)/,
     related: [renal, fever, metabolic], normal: 'Tira reactiva sin sangre, proteínas, nitritos ni esterasa leucocitaria.' },
   { id: 'urocultivo', label: 'Urocultivo', aliases: /(?:urocultivo|cultivo de orina)/,
     related: [renal, fever], normal: 'Sin crecimiento bacteriano significativo.' },
   { id: 'complemento', label: 'Complemento C3', aliases: /(?:complemento(?: c3)?|c3)/,
-    related: [renal, /lupus|inmun|complemento/], normal: 'Complemento C3 dentro del intervalo de referencia.' },
+    related: [renal, /lupus|inmun|complemento/], normal: 'Complemento C3 105 mg/dL.' },
   { id: 'heces', label: 'Estudio de heces', aliases: /(?:coproparasitari[oa]|coproscopico|coprologico|(?:estudio|prueba|analisis) de heces|examen de heces)/,
     related: [digestive, /parasito|heces|giardia|ameb|uncinaria/], normal: 'Sin huevos, quistes ni parásitos en la muestra simulada.' },
   { id: 'pcr', label: 'Proteína C reactiva', aliases: /(?:proteina c reactiva|pcr cuantitativa|pcr inflamatoria)/,
-    related: [fever, chest, /artritis|apendic|inflam|vasculit/], normal: 'Dentro del intervalo de referencia del laboratorio.' },
+    related: [fever, chest, /artritis|apendic|inflam|vasculit/], normal: 'Proteína C reactiva 2 mg/L.' },
   { id: 'ecg', label: 'Electrocardiograma', aliases: /(?:ecg|ekg|electrocardiograma)/,
     related: [chest, electrolytes, /sincop|arritmia|palpitacion|taquicardia|choque|dolor torac|intoxic/],
-    normal: 'Ritmo sinusal, con intervalos adecuados para la edad.' },
+    normal: 'Ritmo sinusal.' },
   { id: 'rx-torax', label: 'Radiografía de tórax', aliases: /(?:(?:radiografia|rx|placa) (?:de |del )?torax)/,
     related: [chest, /trauma|cuerpo extrano|aspiracion/], normal: 'Sin consolidación focal, derrame pleural ni neumotórax.' },
   { id: 'rx-abdomen', label: 'Radiografía de abdomen', aliases: /(?:(?:radiografia|rx|placa) (?:de |del )?abdomen|radiografia abdominal)/,
     related: [digestive], normal: 'Sin dilatación intestinal ni aire libre en el informe simulado.' },
   { id: 'eco-abdomen', label: 'Ecografía abdominal', aliases: /(?:(?:eco|ecografia|ultrasonido) (?:de |del )?abdomen|ecografia abdominal|ultrasonido abdominal)/,
     related: [renal, digestive],
-    normal: 'Sin hallazgos abdominales relevantes en el informe simulado.' },
+    normal: 'Sin líquido libre ni colecciones en el informe simulado.' },
   { id: 'eco-renal', label: 'Ecografía renal', aliases: /(?:ecografia renal|ultrasonido renal|(?:eco|ecografia|ultrasonido) de rinones)/,
     related: [renal, /masa|dilatacion del sistema colector/], normal: 'Riñones sin dilatación del sistema colector en el informe simulado.' },
   { id: 'ecografia', label: 'Ecografía', aliases: /(?:ecografia|ultrasonido)/, related: [], normal: null },
@@ -82,11 +83,55 @@ const studyRequest = /\b(solicit\w*|pedir|pido|ordeno|ordenar|quisiera|quiero|da
 
 // Datos ficticios de esta estación. El caso original registra microcitosis persistente.
 const ironFollowUp = {
-  hemograma: 'Hemoglobina 9,6 g/dL (baja) y VCM 68 fL (bajo). Persiste la microcitosis.',
-  hemoglobina: 'Hemoglobina 9,6 g/dL (baja para la edad).',
-  vcm: 'VCM 68 fL (bajo para la edad).',
-  ferritina: 'Ferritina 8 ng/mL (baja).',
+  hemograma: 'Hemoglobina 9,6 g/dL; VCM 68 fL.',
+  hemoglobina: 'Hemoglobina 9,6 g/dL.',
+  vcm: 'VCM 68 fL.',
+  ferritina: 'Ferritina 8 ng/mL.',
 };
+
+const numericStudies = new Set(['hemograma', 'hemoglobina', 'vcm', 'ferritina', 'hematocrito', 'plaquetas', 'reticulocitos',
+  'glucosa', 'cetonas', 'sodio', 'potasio', 'electrolitos', 'creatinina', 'hepatica', 'bilirrubina', 'albumina',
+  'coagulacion', 'gasometria', 'complemento', 'pcr']);
+const earlyAgeStudies = new Set(['hemograma', 'hemoglobina', 'vcm', 'hematocrito', 'reticulocitos', 'ferritina']);
+const unitValue = /[+-]?\d[\d.,]*\s*(?:[a-zµμ]+\s*\/\s*[a-zµμ]+|\/\s*[a-zµμ]+|%|fL\b|pg\b|s\b)/gi;
+const analyte = /\b(?:hemoglobina|hematocrito|plaquetas|leucocitos|eosin[oó]filos|reticulocitos|ferritina|volumen corpuscular medio|vcm|glucosa|glucemia|cetonas|sodio|potasio|creatinina|bilirrubina(?: total| directa| indirecta)?|albúmina|albumina|tiempo de protrombina|ttpa|complemento c3|proteína c reactiva|proteina c reactiva|bicarbonato|alt|ast)\b/gi;
+export const MISSING_STUDY_VALUE = 'Valor numérico no registrado.';
+
+function rawStudyMeasurements(reply) {
+  let start = 0;
+  const labelled = Array.from(reply.matchAll(unitValue), (match) => {
+    const label = Array.from(reply.slice(start, match.index).matchAll(analyte)).at(-1)?.[0];
+    start = match.index + match[0].length;
+    return label ? label + ' ' + match[0] : match[0];
+  });
+  if (labelled.length) return labelled.join('; ') + '.';
+  return /^\s*(?:(?:pH|INR)\s*)?[+-]?\d+(?:[.,]\d+)?\s*\.?\s*$/i.test(reply) ? reply.trim() : '';
+}
+
+function exampleValue(study, context) {
+  if (study.related.some((pattern) => pattern.test(context))) return null;
+  if (earlyAgeStudies.has(study.id) && /neonat|recien nacido|\b(?:\d+ (?:dias?|semanas?)|[1-5] meses?)\b/.test(context)) return null;
+  return study.normal;
+}
+
+function numericLabel(label) {
+  return studies.some((study) => numericStudies.has(study.id) && matchesStudy(study, normalizeClinicalRequest(label)));
+}
+
+export function formatStudyResult(result) {
+  const value = result.value.trim();
+  const unit = result.unit.trim();
+  if (unit && /^[+-]?\d[\d.,]*$/.test(value)) return `${value} ${unit}`;
+  if (numericLabel(result.label)) return rawStudyMeasurements(value) || MISSING_STUDY_VALUE;
+  return [value, unit].filter(Boolean).join(' ');
+}
+
+export function displayStoredStudy(data, item) {
+  if (item.group !== 'paraclinicos') return item;
+  const edited = data.studyResults?.find((result) => result.id === item.id);
+  if (edited) return { ...item, label: edited.label, reply: formatStudyResult(edited) };
+  return numericLabel(item.label) ? { ...item, reply: rawStudyMeasurements(item.reply) || MISSING_STUDY_VALUE } : item;
+}
 
 const reportTerms = {
   hemograma: /hemoglobin|microcitos|macrocitos|hemato[cq]rito|leucocit|eosinofil|plaquetas|trombocit|anemia/,
@@ -97,7 +142,7 @@ const reportTerms = {
   cetonas: /cetonemia|cetonuria|cetosis/,
   sodio: /hiponatremia|hipernatremia/,
   potasio: /hipopotasemia|hiperpotasemia|hipokalemia|hiperkalemia/,
-  electrolitos: /hiponatremia|hipernatremia|hipopotasemia|hiperpotasemia|sodio|potasio/,
+  electrolitos: /hiponatremia|hipernatremia|hipopotasemia|hiperpotasemia|\b(?:sodio|potasio)\b/,
   creatinina: /filtrado (?:renal|glomerular)|creatinina/,
   hepatica: /patron hepatocelular|estudios hepaticos/,
   coagulacion: /coagulacion alterada|coagulopatia/,
@@ -144,15 +189,31 @@ export function studySuggestions(data, caseId) {
   const clinicalContext = studyContext(data, data.interactions.filter((item) => !['razonamiento', 'acciones', 'cierre'].includes(item.group)));
   const fullContext = studyContext(data);
   const existing = data.interactions.filter((item) => item.group === 'paraclinicos');
-  const available = studies.filter((item) => !existing.some((entry) => matchesStudy(item, normalizeClinicalRequest(entry.label))));
+  const edited = (data.studyResults ?? []).filter((item) => !existing.some((entry) => entry.id === item.id));
+  const stored = [...existing.map((item) => displayStoredStudy(data, item)), ...edited];
+  const available = studies.filter((item) => !stored.some((entry) => matchesStudy(item, normalizeClinicalRequest(entry.label))));
   const curated = available.filter((item) => Object.hasOwn(results, item.id));
   const reported = curated.length ? curated.filter((item) => item.id !== 'vcm')
-    : available.filter((item) => examReport(item, data) && !['hemoglobina', 'vcm'].includes(item.id));
+    : available.filter((item) => {
+      if (['hemoglobina', 'vcm'].includes(item.id)) return false;
+      const reply = examReport(item, data);
+      return reply && (!numericStudies.has(item.id) || rawStudyMeasurements(reply));
+    });
+  const quantified = available.filter((item) => !['hemoglobina', 'vcm'].includes(item.id)
+    && measuredExample(item.id, examReport(item, data), fullContext));
   const related = available.filter((item) => item.related.some((pattern) => pattern.test(clinicalContext)));
-  const examples = reported.length || existing.length ? [] : available.filter((item) => item.normal
-    && !item.related.some((pattern) => pattern.test(fullContext))).slice(0, 1);
-  return [...new Set([...reported, ...related.slice(0, examples.length ? 2 : 3), ...examples, ...related])]
+  const examples = reported.length || quantified.length || existing.length || edited.length ? [] : available.filter((item) => exampleValue(item, fullContext)).slice(0, 1);
+  const suggestions = [...new Set([...reported, ...quantified, ...related.slice(0, examples.length ? 2 : 3), ...examples, ...related])]
     .slice(0, 3).map(({ id, label }) => ({ id, label, documented: reported.some((item) => item.id === id) }));
+  return [...edited.map(({ id, label }) => ({ id: 'edited:' + id, label, documented: true })), ...suggestions];
+}
+
+export function stationStudySamples(data, caseId) {
+  const results = stationStudyResults(data, caseId);
+  return studies.flatMap((study) => {
+    const value = results[study.id] ?? examReport(study, data);
+    return value ? [{ id: 'sample-' + study.id, label: study.label, value, unit: '', reference: '' }] : [];
+  });
 }
 
 export function requestedStudies(data, question, caseId) {
@@ -163,30 +224,48 @@ export function requestedStudies(data, question, caseId) {
     && !(study.id === 'radiografia' && matched.some((item) => item.id.startsWith('rx-'))));
   const explicit = studyRequest.test(text);
   const generic = /\bparaclinic[oa]s?\b/.test(text);
-  const documented = data.interactions.filter((item) => item.group === 'paraclinicos' && item.reply
-    && (text === normalizeClinicalRequest(item.label)
-      || (generic && !requested.length)
-      || requested.some((study) => matchesStudy(study, normalizeClinicalRequest(item.label + ' ' + item.reply)))));
+  const edited = (data.studyResults ?? []).filter((item) => {
+    const label = normalizeClinicalRequest(item.label);
+    return text === label || (explicit && (
+      (generic && !requested.length && /^(?:solicito |pido |dame )?(?:los )?paraclinicos?$/.test(text))
+      || (' ' + text + ' ').includes(' ' + label + ' ')
+      || requested.some((study) => matchesStudy(study, label))));
+  });
+  const documented = data.interactions.filter((item) => {
+    if (item.group !== 'paraclinicos') return false;
+    if (edited.some((entry) => entry.id === item.id)) return true;
+    if (!item.reply) return false;
+    if (text === normalizeClinicalRequest(item.label) || (generic && !requested.length)) return true;
+    const label = normalizeClinicalRequest(item.label + ' ' + item.reply);
+    return requested.some((study) => matchesStudy(study, label)
+      && !edited.some((entry) => matchesStudy(study, normalizeClinicalRequest(entry.label))));
+  });
   const remainder = requested.reduce((current, study) =>
     current.replace(new RegExp(`\\b${study.aliases.source}\\b`, 'g'), ' '), text);
   const bare = requested.length > 0 && /^(?:(?:y|o|el|la|los|las|un|una|por favor)\b\s*|\s+)*$/.test(remainder);
-  if (!explicit && !bare && !documented.some((item) => text === normalizeClinicalRequest(item.label))) return null;
-  if (!requested.length && !documented.length && !generic
+  if (!explicit && !bare && !edited.length && !documented.some((item) => text === normalizeClinicalRequest(item.label))) return null;
+  if (!requested.length && !documented.length && !edited.length && !generic
       && !/\b(hemocultivos?|cultivos?|radiografias?|ecografias?|tomografias?|resonancia|prueba de laboratorio)\b/.test(text)) return null;
 
-  const stored = documented.map((item) => normalizeClinicalRequest(item.label + ' ' + item.reply));
+  const stored = [...documented.map((item) => item.label + ' ' + item.reply), ...edited.map((item) => item.label)].map(normalizeClinicalRequest);
   const context = studyContext(data);
   const results = stationStudyResults(data, caseId);
-  const supplemental = [];
+  const supplemental = edited.filter((item) => !documented.some(({ id }) => item.id === id)).map((item) => {
+    const reply = formatStudyResult(item);
+    return { id: 'edited:' + item.id, label: item.label, reply, kind: reply === MISSING_STUDY_VALUE ? 'unavailable' : 'case' };
+  });
   for (const study of requested) {
     if (stored.some((label) => matchesStudy(study, label))) continue;
     const caseResult = results[study.id] ?? examReport(study, data);
-    const normal = !caseResult && !study.related.some((pattern) => pattern.test(context)) ? study.normal : null;
+    const numeric = numericStudies.has(study.id);
+    const report = numeric && caseResult ? rawStudyMeasurements(caseResult) || MISSING_STUDY_VALUE : caseResult;
+    const filled = report === MISSING_STUDY_VALUE ? measuredExample(study.id, caseResult, context) : '';
+    const simulated = filled || (caseResult ? null : exampleValue(study, context));
     supplemental.push({
       id: study.id, label: study.label,
-      reply: caseResult ?? (normal || (['radiografia', 'ecografia'].includes(study.id)
-        ? 'Indica la región de la imagen para consultar el resultado.' : 'El caso no trae un resultado para este estudio.')),
-      kind: caseResult ? 'case' : normal ? 'simulated' : 'unavailable',
+      reply: filled || (report ?? (simulated || (['radiografia', 'ecografia'].includes(study.id)
+        ? 'Indica la región de la imagen para consultar el resultado.' : numeric ? MISSING_STUDY_VALUE : 'El caso no trae un resultado para este estudio.'))),
+      kind: report && report !== MISSING_STUDY_VALUE ? 'case' : simulated ? 'simulated' : 'unavailable',
     });
   }
   if (!documented.length && !supplemental.length) {
@@ -194,5 +273,5 @@ export function requestedStudies(data, question, caseId) {
       reply: generic ? 'Indica el nombre del estudio. Para una imagen, incluye también la región.'
         : 'El caso no trae un resultado para ese estudio. Si pediste una imagen, indica la región.', kind: 'unavailable' });
   }
-  return { documented, supplemental };
+  return { documented: documented.map((item) => displayStoredStudy(data, item)), supplemental };
 }

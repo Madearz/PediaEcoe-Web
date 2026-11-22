@@ -11,6 +11,12 @@ const short = (item, max) => typeof item === 'string' && item.trim().length > 0 
 export const validId = (id) => typeof id === 'string' && idPattern.test(id);
 export const validCurricularGroups = (groups) => Array.isArray(groups) && groups.length <= CURRICULAR_GROUPS.length
   && new Set(groups).size === groups.length && groups.every((group) => CURRICULAR_GROUPS.includes(group));
+export function validStudyResults(results) {
+  return Array.isArray(results) && results.length <= 24
+    && results.every((item) => item && validId(item.id) && short(item.label, 120) && short(item.value, 260)
+      && (item.unit === '' || short(item.unit, 40)) && (item.reference === '' || short(item.reference, 120)))
+    && new Set(results.map((item) => item.id)).size === results.length;
+}
 
 export function validCase(data, rubric) {
   if (!data || !rubric || !short(data.title, 110) || !short(data.category, 80)
@@ -18,6 +24,7 @@ export function validCase(data, rubric) {
       || !['Baja', 'Media', 'Alta'].includes(data.difficulty)
       || !['draft', 'review', 'published'].includes(data.status)
       || (data.curricularGroups !== undefined && !validCurricularGroups(data.curricularGroups))
+      || (data.studyResults !== undefined && !validStudyResults(data.studyResults))
       || !Array.isArray(data.interactions) || data.interactions.length < 5 || data.interactions.length > 35
       || !short(rubric.diagnosis, 200) || !short(rubric.reference, 300)
       || !Array.isArray(rubric.criteria) || rubric.criteria.length > 35

@@ -8,7 +8,7 @@ import { grade, readInvitations, structured, validAnswers, validCase } from '../
 import { PATIENT_HISTORY_LIMIT, socialReply } from '../shared/dialogue.mjs';
 import { caseGroups } from '../shared/case-groups.mjs';
 import { examAreas, requestedExam } from '../shared/exam.mjs';
-import { requestedStudies, studySuggestions } from '../shared/studies.mjs';
+import { displayStoredStudy, MISSING_STUDY_VALUE, requestedStudies, studySuggestions } from '../shared/studies.mjs';
 import { readFile } from 'node:fs/promises';
 
 const bearer = { Authorization: 'Bearer a.b.c', 'Content-Type': 'application/json' };
@@ -64,7 +64,7 @@ test('los paraclínicos priorizan el resultado del caso y solo simulan normalida
   assert.equal(requestedStudies(noRadiograph, '¿Cuál es el resultado de la radiografía de tórax?').supplemental[0].kind, 'unavailable');
   const metabolic = { ...respiratory, interactions: [{ group: 'exploracion', label: 'Glucemia y estado mental', reply: 'Glucemia baja y somnolencia.' }] };
   assert.deepEqual(requestedStudies(metabolic, 'Glucosa, por favor').supplemental[0],
-    { label: 'Glucosa', id: 'glucosa', kind: 'case', reply: 'Glucemia baja y somnolencia.' });
+    { label: 'Glucosa', id: 'glucosa', kind: 'simulated', reply: 'Glucosa 48 mg/dL.' });
   assert.equal(requestedStudies(respiratory, '¿Le hicieron una radiografía de tórax antes de venir?'), null);
   assert.equal(requestedStudies(respiratory, '¿Tiene tos?'), null);
 });
@@ -76,7 +76,7 @@ test('la estación de anemia ofrece estudios pertinentes y reconoce la hemoglobi
     ] };
   assert.deepEqual(studySuggestions(data).map((item) => item.label), ['Hemograma', 'Hemoglobina', 'Ferritina']);
   assert.deepEqual(requestedStudies(data, '¿Cuánto tiene de hemoglobina?').supplemental[0],
-    { id: 'hemoglobina', label: 'Hemoglobina', kind: 'case', reply: 'Hemoglobina 9,6 g/dL (baja para la edad).' });
+    { id: 'hemoglobina', label: 'Hemoglobina', kind: 'case', reply: 'Hemoglobina 9,6 g/dL.' });
   assert.match(requestedStudies(data, 'Solicito Hemograma').supplemental[0].reply, /VCM 68 fL/);
   assert.equal(requestedStudies(data, 'Pido ferritina').supplemental[0].kind, 'case');
   assert.equal(requestedStudies(data, 'Pido sodio').supplemental[0].kind, 'simulated');
@@ -84,7 +84,7 @@ test('la estación de anemia ofrece estudios pertinentes y reconoce la hemoglobi
   assert.deepEqual(requestedStudies({ ...data, interactions: [documented] }, '¿Cuál es la Hb?').documented, [documented]);
 });
 
-test('otras estaciones recuperan resultados de las notas sin convertir datos ausentes en cifras', () => {
+test('otras estaciones muestran mediciones y mantienen separados los resultados sin cifra', () => {
   const station = (title, label, reply) => ({
     title, category: 'Urgencias', scenario: 'Caso simulado', opening: 'Venimos a consulta.',
     interactions: [{ group: 'exploracion', label, reply }],
@@ -92,19 +92,39 @@ test('otras estaciones recuperan resultados de las notas sin convertir datos aus
   const sodium = station('Alteración electrolítica', 'Perfusión y sodio en tendencia',
     'Hiponatremia moderada confirmada; conciencia conservada.');
   const sodiumResult = requestedStudies(sodium, '¿Cuánto tiene de sodio?').supplemental[0];
-  assert.equal(sodiumResult.kind, 'case');
-  assert.equal(sodiumResult.reply, 'Hiponatremia moderada confirmada');
-  assert.ok(studySuggestions(sodium).some(({ id, documented }) => id === 'sodio' && documented));
-  const diabetes = station('Diabetes', 'Glucemia, cetonas y estado ácido-base', 'Hiperglucemia, cetonas elevadas y acidosis metabólica.');
+  assert.equal(sodiumResult.kind, 'simulated');
+  assert.equal(sodiumResult.reply, 'Sodio 128 mmol/L.');
+  const pending = station('Alteración electrolítica', 'Sodio en estudio', 'Hiponatremia sospechada; resultado pendiente.');
+  assert.equal(requestedStudies(pending, 'Sodio').supplemental[0].reply, MISSING_STUDY_VALUE);
+  const diabetes = station('Diabetes', 'Glucemia, cetonas y estado ácido-base',
+    'Glucemia 340 mg/dL (alta), cetonas 4,0 mmol/L (elevadas).');
   assert.equal(requestedStudies(diabetes, 'Solicito glucosa').supplemental[0].kind, 'case');
-  assert.equal(requestedStudies(diabetes, 'Solicito cetonas').supplemental[0].kind, 'case');
-  const bilirubin = station('Ictericia', 'Bilirrubina fraccionada', 'Bilirrubina directa elevada con hepatomegalia leve.');
-  assert.match(requestedStudies(bilirubin, 'Bilirrubina directa').supplemental[0].reply, /Bilirrubina directa elevada/);
+  assert.doesNotMatch(requestedStudies(diabetes, 'Solicito cetonas').supplemental[0].reply, /alta|elevadas/);
+  const bilirubin = station('Ictericia', 'Bilirrubina fraccionada', 'Bilirrubina directa 4,2 mg/dL (elevada), con hepatomegalia leve.');
+  assert.equal(requestedStudies(bilirubin, 'Bilirrubina directa').supplemental[0].reply, 'Bilirrubina directa 4,2 mg/dL.');
   const lcr = station('Meningitis', 'Resultados del LCR', 'Pleocitosis linfocítica y glucosa conservada.');
   assert.equal(requestedStudies(lcr, 'Solicito análisis de líquido cefalorraquídeo').supplemental[0].kind, 'case');
   assert.equal(requestedStudies(lcr, 'Pido glucosa').supplemental[0].kind, 'unavailable');
   const skin = station('Dermatitis', 'Distribución de lesiones', 'Placas flexurales escamosas.');
   assert.ok(studySuggestions(skin).some(({ label }) => requestedStudies(skin, label).supplemental[0].kind === 'simulated'));
+});
+
+test('los paraclínicos del editor conservan el vínculo evaluable y muestran valor y unidad sin el rango', () => {
+  const { data, rubric } = example[0];
+  const legacy = data.interactions.find((item) => item.group === 'paraclinicos');
+  const studyResults = [
+    { id: legacy.id, label: 'Radiografía de tórax', value: 'Opacidad en base derecha.', unit: '', reference: 'Informe previo' },
+    { id: 'lab-new', label: 'Hemoglobina', value: '10,2', unit: 'g/dL', reference: '11,5–15,5' },
+  ];
+  const edited = { ...data, studyResults };
+  assert.ok(validCase(edited, rubric));
+  assert.ok(!validCase({ ...edited, studyResults: [studyResults[0], studyResults[0]] }, rubric));
+  assert.deepEqual(displayStoredStudy(edited, legacy), { ...legacy, label: 'Radiografía de tórax', reply: 'Opacidad en base derecha.' });
+  assert.equal(requestedStudies(edited, 'Solicito radiografía de tórax').documented[0].id, legacy.id);
+  const hemoglobin = requestedStudies(edited, 'Solicito hemoglobina').supplemental[0];
+  assert.equal(hemoglobin.reply, '10,2 g/dL');
+  assert.equal(hemoglobin.kind, 'case');
+  assert.ok(studySuggestions(edited).some(({ label }) => label === 'Hemoglobina'));
 });
 
 test('tres borradores válidos y evaluación con decisiones mutuamente excluyentes', () => {

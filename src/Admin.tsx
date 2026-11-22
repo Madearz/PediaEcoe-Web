@@ -5,8 +5,9 @@ import { collection, count, doc, deleteDoc, getAggregateFromServer, getDocFromSe
   query, runTransaction, setDoc, sum, writeBatch } from 'firebase/firestore';
 import { database } from './Student';
 import { call, messageOf } from './firebase';
-import { CURRICULAR_GROUPS, DAILY_CIRCUITS_DEFAULT, DAILY_CIRCUITS_MAX, GROUPS, normalizeEmail, readInvitations, validCase, validId, type CaseData, type CurricularGroup, type Rubric } from '../shared/clinical.mjs';
+import { CURRICULAR_GROUPS, DAILY_CIRCUITS_DEFAULT, DAILY_CIRCUITS_MAX, GROUPS, normalizeEmail, readInvitations, validCase, validId, validStudyResults, type CaseData, type CurricularGroup, type Rubric, type StudyResult } from '../shared/clinical.mjs';
 import { caseGroups } from '../shared/case-groups.mjs';
+import { formatStudyResult, MISSING_STUDY_VALUE, stationStudySamples } from '../shared/studies.mjs';
 
 const emptyCase: CaseData = { title: '', category: '', difficulty: 'Media', scenario: '', opening: '', status: 'draft', interactions: [], curricularGroups: [] };
 const emptyRubric: Rubric = { diagnosis: '', reference: '', criteria: [], critical: [] };
@@ -152,6 +153,19 @@ function CaseEditor() {
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const [remove, setRemove] = useState(false);
+  const studies = data.studyResults ?? [];
+  const existingStudies = [
+    ...data.interactions.filter((item) => item.group === 'paraclinicos').map(({ id, label, reply }) => ({
+      id, label, value: reply, unit: '', reference: '',
+    })),
+    ...stationStudySamples(data, selected),
+  ].filter((item) => !studies.some((study) => study.id === item.id || study.label.toLowerCase() === item.label.toLowerCase()));
+  function updateStudy(row: StudyResult) {
+    setData((current) => ({ ...current, studyResults: (current.studyResults ?? []).map((item) => item.id === row.id ? row : item) }));
+  }
+  function addStudy(row: StudyResult) {
+    setData((current) => ({ ...current, studyResults: [...(current.studyResults ?? []), row] }));
+  }
   const reset = (next: CaseData, scoring: Rubric) => {
     setData(next);
     setRubric(scoring);
@@ -196,6 +210,10 @@ function CaseEditor() {
         current = { ...data, interactions: JSON.parse(structure) };
         scoring = { ...rubric, criteria: JSON.parse(criteria), critical: JSON.parse(critical) };
       } catch { throw new Error('Revisa el formato JSON de interacciones, criterios y errores críticos.'); }
+      if (current.studyResults && (!validStudyResults(current.studyResults)
+          || current.studyResults.some((item) => formatStudyResult(item) === MISSING_STUDY_VALUE))) {
+        throw new Error('Revisa los paraclínicos. Escribe el resultado de cada estudio y, para resultados cuantitativos, el valor numérico.');
+      }
       if (!validCase(current, scoring)) throw new Error('Revisa que todas las opciones tengan un identificador distinto, que las decisiones tengan al menos dos opciones y que los dominios sumen 20, 20, 20, 25 y 15.');
       if (current.status === 'published' && !reviewed) throw new Error('Confirma la revisión médica para publicar esta versión.');
       const item = doc(database, 'case_bank', draftId);
@@ -272,6 +290,30 @@ function CaseEditor() {
       <label>Diagnóstico esperado<input required maxLength={200} value={rubric.diagnosis} onChange={(event) => setRubric({ ...rubric, diagnosis: event.target.value })}/></label>
       <label className="wide">Escenario<textarea required maxLength={750} value={data.scenario} onChange={(event) => setData({ ...data, scenario: event.target.value })}/></label>
       <label className="wide">Frase inicial del familiar<textarea required maxLength={750} value={data.opening} onChange={(event) => setData({ ...data, opening: event.target.value })}/></label>
+      <fieldset className="wide study-editor">
+        <legend>Paraclínicos</legend>
+        {studies.map((item) => <div className="study-editor-row" key={item.id}>
+          <label>Nombre del estudio<input required maxLength={120} value={item.label} onChange={(event) => updateStudy({ ...item, label: event.target.value })}/></label>
+          <label>Resultado<input required maxLength={260} value={item.value} placeholder="Ej. 9,6" onChange={(event) => updateStudy({ ...item, value: event.target.value })}/></label>
+          <label>Unidad<input maxLength={40} value={item.unit} placeholder="Ej. g/dL" onChange={(event) => updateStudy({ ...item, unit: event.target.value })}/></label>
+          <label>Rango de referencia (opcional)<input maxLength={120} value={item.reference} onChange={(event) => updateStudy({ ...item, reference: event.target.value })}/></label>
+          <button type="button" className="button secondary" disabled={busy} aria-label={`Quitar edición de ${item.label || 'estudio'}`}
+            onClick={() => setData((current) => ({ ...current, studyResults: (current.studyResults ?? []).filter(({ id }) => id !== item.id) }))}>Quitar edición</button>
+        </div>)}
+        <button type="button" className="button secondary" disabled={busy || studies.length >= 24} onClick={() => addStudy({
+          id: 'lab-' + crypto.randomUUID(), label: '', value: '', unit: '', reference: '',
+        })}><Plus size={16}/> Agregar paraclínico</button>
+        {!!existingStudies.length && <details>
+          <summary>Resultados existentes</summary>
+          <ul className="study-existing">{existingStudies.map((item) => <li key={item.id}>
+            <span><strong>{item.label}</strong><small>{item.value || 'Sin resultado consignado.'}</small></span>
+            <button type="button" className="button secondary" disabled={busy || studies.length >= 24} onClick={() => {
+              const value = formatStudyResult(item);
+              addStudy({ ...item, value: value === MISSING_STUDY_VALUE ? '' : value });
+            }}>Usar como base</button>
+          </li>)}</ul>
+        </details>}
+      </fieldset>
       <label className="wide">Interacciones JSON<textarea rows={8} spellCheck={false} value={structure} onChange={(event) => setStructure(event.target.value)}/>
         <small>{'{ id, group, label, reply }'} · {GROUPS.join(', ')}</small></label>
       <label>Criterios JSON<textarea rows={6} spellCheck={false} value={criteria} onChange={(event) => setCriteria(event.target.value)}/>

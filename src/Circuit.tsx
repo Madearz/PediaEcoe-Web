@@ -12,7 +12,7 @@ import { createVoiceCall, type CallPhase, type CallState } from './voice-call';
 import { PHASES, SINGLE, STATION_MS, structured, type CaseData, type Grade, type Group, type Interaction } from '../shared/clinical.mjs';
 import { PATIENT_HISTORY_LIMIT } from '../shared/dialogue.mjs';
 import { EXAM_AREAS, examAreas, requestedExam, type ExamArea } from '../shared/exam.mjs';
-import { requestedStudies, studySuggestions, type StudyFinding } from '../shared/studies.mjs';
+import { displayStoredStudy, MISSING_STUDY_VALUE, requestedStudies, studySuggestions, type StudyFinding } from '../shared/studies.mjs';
 
 type Session = { id: string; index: number; complete: boolean; case: CaseData | null; caseIds?: string[]; titles: string[]; deadline: number | null; serverNow: number };
 type Turn = { question: string; reply: string; mode: 'structured'|'ai'; clinical?: boolean };
@@ -150,7 +150,7 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
       setExamArea('all');
       const reply = [
         ...documented.map((item) => `${item.label}. ${item.reply}`),
-        ...extra.map((item) => `${item.label}. ${item.kind === 'simulated' ? 'Normal simulado. ' : ''}${item.reply}`),
+        ...extra.map((item) => `${item.label}. ${item.kind === 'simulated' ? 'Resultado simulado. ' : ''}${item.reply}`),
       ].join('\n');
       addTurn({ question, reply, mode: 'structured', clinical: true });
       return reply;
@@ -201,11 +201,12 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
   const centralGroup = phases[phase][0];
   const toolOptions = tool === 'exploracion'
     ? examOptions.filter((item) => examArea === 'all' || item.areas.includes(examArea))
-    : station.interactions.filter((item) => item.group === tool).map((item) => ({ ...item, areas: [] }));
+    : station.interactions.filter((item) => item.group === tool).map((item) => ({ ...displayStoredStudy(station, item), areas: [] }));
   const availableAreas = (Object.keys(EXAM_AREAS) as ExamArea[]).filter((area) => examOptions.some((item) => item.areas.includes(area)));
   const recordedFindings = selected.map((id) => station.interactions.find((item) => item.id === id))
-    .filter((item): item is Interaction => Boolean(item && (item.group === 'exploracion' || item.group === 'paraclinicos') && item.reply))
-    .reverse().map((item) => ({ ...item, kind: 'case' as const }));
+    .filter((item): item is Interaction => Boolean(item && (item.group === 'exploracion' || item.group === 'paraclinicos')))
+    .reverse().map((item) => displayStoredStudy(station, item)).filter((item) => item.reply)
+    .map((item) => ({ ...item, kind: item.reply === MISSING_STUDY_VALUE ? 'unavailable' as const : 'case' as const }));
   const findings = [...supplemental, ...recordedFindings].sort((first, second) =>
     Number(second.id === latestFinding) - Number(first.id === latestFinding));
   return <main className="simulator">
@@ -292,7 +293,7 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
         <div className="findings"><h3><ClipboardList size={19}/> Hallazgos solicitados</h3>
           <span className="sr-only" role="status">{latestFinding && findings.find((item) => item.id === latestFinding)?.reply}</span>
           {findings.length ? <ul className="findings-list">{findings.map((item) => <li key={item.id} className={item.id === latestFinding ? 'latest' : ''}>
-            <small>{item.kind === 'simulated' ? 'Normal simulado' : item.kind === 'unavailable' ? 'Sin resultado' : labels[item.group]}</small>
+            <small>{item.kind === 'simulated' ? 'Resultado simulado' : item.kind === 'unavailable' ? 'Sin resultado' : labels[item.group]}</small>
             <strong>{item.label}</strong><p>{item.reply}</p>
           </li>)}</ul> : <p>Solicita una exploración o un paraclínico para ver su resultado aquí.</p>}
         </div>
