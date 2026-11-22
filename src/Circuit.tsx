@@ -278,12 +278,14 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
           {!toolOptions.length && tool !== 'paraclinicos' && <p>{`Este caso no incluye ${tool === 'exploracion' ? 'hallazgos de examen físico' : 'acciones'} en esta sección.`}</p>}</div>
         {tool === 'paraclinicos' && <div className="study-suggestions">
           {suggestedStudies.length > 0 && <>
-            <p>Ejemplos para esta estación</p>
+            <p>Ejemplos de paraclínicos</p>
             <div className="option-list">{suggestedStudies.map((study) => <button type="button" key={study.id}
-              className="button secondary" disabled={saving || !time} onClick={() => {
+              className="button secondary" aria-label={`Solicitar ${study.label}`} disabled={saving || !time} onClick={() => {
                 void requestAnswer(`Solicito ${study.label}`, new AbortController().signal)
                   .catch((failure) => setError(messageOf(failure)));
-              }}>{study.label}</button>)}</div>
+              }}>{study.label}
+              {study.documented && <small className="study-case">Del caso</small>}
+            </button>)}</div>
           </>}
           <small>También puedes pedir estudios por su nombre en la conversación.</small>
         </div>}

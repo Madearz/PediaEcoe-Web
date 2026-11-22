@@ -156,6 +156,7 @@ textarea { resize: vertical; }
 .study-suggestions { display: grid; gap: .45rem; margin-top: .6rem; }
 .study-suggestions > p { font-size: .9rem; font-weight: 650; }
 .study-suggestions > small { color: var(--muted); }
+.study-case { color: var(--deep); font-size: .72rem; }
 .findings { background: #f2f0fc; border: 1px solid var(--border); border-radius: 13px; margin-top: .8rem; padding: .75rem; }
 .findings p { margin-top: .45rem; font-size: .91rem; }
 .findings-list { list-style: none; display: grid; gap: .45rem; margin: .55rem 0 0; padding: 0; }

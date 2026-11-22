@@ -84,6 +84,29 @@ test('la estación de anemia ofrece estudios pertinentes y reconoce la hemoglobi
   assert.deepEqual(requestedStudies({ ...data, interactions: [documented] }, '¿Cuál es la Hb?').documented, [documented]);
 });
 
+test('otras estaciones recuperan resultados de las notas sin convertir datos ausentes en cifras', () => {
+  const station = (title, label, reply) => ({
+    title, category: 'Urgencias', scenario: 'Caso simulado', opening: 'Venimos a consulta.',
+    interactions: [{ group: 'exploracion', label, reply }],
+  });
+  const sodium = station('Alteración electrolítica', 'Perfusión y sodio en tendencia',
+    'Hiponatremia moderada confirmada; conciencia conservada.');
+  const sodiumResult = requestedStudies(sodium, '¿Cuánto tiene de sodio?').supplemental[0];
+  assert.equal(sodiumResult.kind, 'case');
+  assert.equal(sodiumResult.reply, 'Hiponatremia moderada confirmada');
+  assert.ok(studySuggestions(sodium).some(({ id, documented }) => id === 'sodio' && documented));
+  const diabetes = station('Diabetes', 'Glucemia, cetonas y estado ácido-base', 'Hiperglucemia, cetonas elevadas y acidosis metabólica.');
+  assert.equal(requestedStudies(diabetes, 'Solicito glucosa').supplemental[0].kind, 'case');
+  assert.equal(requestedStudies(diabetes, 'Solicito cetonas').supplemental[0].kind, 'case');
+  const bilirubin = station('Ictericia', 'Bilirrubina fraccionada', 'Bilirrubina directa elevada con hepatomegalia leve.');
+  assert.match(requestedStudies(bilirubin, 'Bilirrubina directa').supplemental[0].reply, /Bilirrubina directa elevada/);
+  const lcr = station('Meningitis', 'Resultados del LCR', 'Pleocitosis linfocítica y glucosa conservada.');
+  assert.equal(requestedStudies(lcr, 'Solicito análisis de líquido cefalorraquídeo').supplemental[0].kind, 'case');
+  assert.equal(requestedStudies(lcr, 'Pido glucosa').supplemental[0].kind, 'unavailable');
+  const skin = station('Dermatitis', 'Distribución de lesiones', 'Placas flexurales escamosas.');
+  assert.ok(studySuggestions(skin).some(({ label }) => requestedStudies(skin, label).supplemental[0].kind === 'simulated'));
+});
+
 test('tres borradores válidos y evaluación con decisiones mutuamente excluyentes', () => {
   assert.equal(example.length, 3);
   for (const { data, rubric } of example) {
