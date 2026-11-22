@@ -404,6 +404,14 @@ test('la anamnesis encadena detalles del síntoma, otros síntomas y medicamento
   ] };
   assert.equal(structured(pain, '¿En qué parte le duele?'), 'Me señala el lado izquierdo del pecho.');
   assert.equal(structured(pain, '¿Qué pasa si se acuesta?'), 'Me dice que le duele más cuando se acuesta.');
+  const vomiting = { ...currentCase, opening: 'Vomita desde ayer.', interactions: [
+    { group: 'anamnesis', label: 'Número de vómitos', reply: 'Fueron cuatro episodios.' },
+    { group: 'anamnesis', label: 'Aspecto del vómito', reply: 'Eran restos de comida, sin sangre.' },
+  ] };
+  assert.equal(structured(vomiting, '¿Desde hace cuánto está así?'), 'Vomita desde ayer.');
+  assert.match(structured(vomiting, '¿Cómo son los vómitos y cuántos fueron?'), /cuatro episodios.*restos de comida/);
+  assert.match(structured(vomiting, '¿Cuántos?', [{ question: '¿Cómo son los vómitos?' }]), /cuatro episodios/);
+  assert.match(structured({ ...vomiting, interactions: [] }, '¿Cuántos vómitos ha tenido?'), /No alcancé a contar/);
 });
 
 test('Worker rechaza puntajes del navegador, calcula y guarda con precondiciones', async () => {

@@ -6,7 +6,7 @@ export const patientAge = (data) => data.scenario?.match(/\bde (\d+ (?:años?|me
 
 const ignored = new Set(['acerca', 'algun', 'alguna', 'antes', 'algo', 'como', 'cuando', 'cuanto', 'desde', 'donde', 'hace',
   'manera', 'nino', 'nina', 'puede', 'podria', 'pregunta', 'sobre', 'tiene', 'usted', 'doctor', 'doctora']);
-const timingQuestion = /\b(desde cuando|hace cuanto|cuando (empezo|comenzo|inicio)|desde que (dia|hora)|hace cuantos dias|inicio|duracion)\b/;
+const timingQuestion = /\b(desde cuando|hace cuant[oa]s?|cuando (?:(?:le |se )?(?:empezo|comenzo|inicio))|desde que (dia|hora)|inicio|duracion|cuanto tiempo)\b/;
 const timingFact = /\b(inicio|evolucion|duracion|primero|horas|dias|semanas|ayer|empezo|comenzo)\b/;
 const medicationQuestion = /\b(medicamentos?|medicamenots?|medicacion|medicinas?|farmacos?|jarabes?|tratamientos?|remedios?|pastillas?|antibioticos?|inhaladores?|insulina|diureticos?|descongestionantes?|hierro|paracetamol|acetaminofen|ibuprofeno|antihistaminicos?)\b/;
 const specificMedication = /\b(antibioticos?|inhaladores?|insulina|diureticos?|descongestionantes?|hierro|paracetamol|acetaminofen|ibuprofeno|antihistaminicos?)\b/;
@@ -32,7 +32,7 @@ const subjects = [
   [/\b(respirar|respira|respiracion|agita|ahoga|falta de aire)\b/, /respirat|respira|tiraje|disnea|ahoga|agita/],
   [/\b(comer|come|beber|bebe|tomas?|tomando|alimentacion|leche|pecho)\b/, /alimenta|tolerancia|ingesta|tomas?|bebe|leche|pecho|sorbos/],
   [/\b(orina|orinar|pip[ií]|panales?|miccion)\b/, /orin|diuresis|panal|panales|miccion/],
-  [/\b(vomito|vomita|vomitar|emesis)\b/, /vomit|emesis/],
+  [/\b(?:vomit\w*|vomits\w*|emesis|devuelve)\b/, /vomit|emesis|devolvi/],
   [/\b(diarrea|deposiciones?|evacua|popo|heces)\b/, /diarrea|deposicion|evacu|heces/],
   [medicationQuestion, medicationQuestion],
   [allergyQuestion, /alerg/],
@@ -57,17 +57,21 @@ const openQuestion = /\b(que (?:(?:le|lo|la|les|los|las|te) )?(?:trae|trajo|paso
 const followUp = /^(?:y )?(?:desde cuando|cuando fue|hace cuanto|cuanto tiempo|luego|despues|que paso despues|que mas|algo mas|me cuenta mas|podria contarme mas|eso|como asi)(?: paso| exactamente)?$/;
 const ageQuestion = /\b(que edad tiene|cuantos (?:anos|meses) tiene|cual es (?:la|su) edad)\b/;
 const outOfRole = /\b(?:no (?:tengo|cuento con|dispongo de) (?:ese|el|este) dato|no recuerdo bien ese detalle|pregunt\w* de otra (?:forma|manera)|reformul\w* (?:la|su|tu) pregunta|(?:no se (?:han )?)?(?:detect\w*|identific\w*|observ\w*) (?:de )?(?:comportamientos? inadecuados?|contenido (?:inadecuado|inapropiado|ofensivo)))\b/;
+const onsetOfIllness = /\b(?:enferm[oa]|est[aá] asi|esta enfermo|con esto|empezo todo|comenzo todo)\b/;
+const frequencyQuestion = /\b(?:cuant[oa]s\b(?! (?:dias?|horas?|meses?|semanas?)\b)|cada cuanto|con que frecuencia)\b/;
 const detailFacets = [
   [/\b(?:en que (?:parte|lado|zona|lugar)|donde|ubicacion|localizacion|distribucion|se extendio|se riega|se propag)\w*\b/, /\b(?:cabeza|cara|mejillas?|cuello|cervical\w*|axila\w*|inguinal\w*|ingle\w*|occipital\w*|retroauricular\w*|detras de (?:las? )?orejas?|parpado|piel|tronco|brazos?|manos?|piernas?|pies?|abdomen|pecho|costado|alrededor|dispers\w*|generalizad\w*)\b/,
     'No sabría señalarle en qué parte exactamente.'],
   [timingQuestion, /\b(?:ayer|anoche|hace \w+|\d+ (?:dias|horas|semanas)|desde|inicio brusco|de golpe|al despertar)\b/,
     'No recuerdo cuándo empezó exactamente.'],
+  [frequencyQuestion, /\b(?:(?:una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|varias|varios|muchas|muchos|\d+) (?:vez|veces|episodios?|vomit\w*)|cada (?:vez|\w+ (?:horas?|dias?))|una tras otra)\b/,
+    'No alcancé a contar cuántos episodios tuvo.'],
   [/\b(?:como ha (?:cambiado|seguido)|ha (?:empeorado|mejorado|cambiado)|evolucion|ha vuelto|siguen? (?:saliendo|apareciendo)|que paso despues|se (?:quito|fue))\b/, /\b(?:desaparec\w*|siguen? (?:saliendo|apareciendo)|vuelve\w*|mejor\w*|peor|empeor\w*|persist\w*|recurr\w*|nuev\w*)\b/,
     'No he podido precisar cómo ha cambiado.'],
   [/\b(?:que tan (?:fuerte|intenso)|cuanto (?:le )?duele|intensidad|que (?:lo |le )?(?:empeora|alivia|mejora)|con que (?:empeora|mejora))\b/, /\b(?:mucho|leve|fuerte|intens\w*|posicional|al acostar\w*|al mover\w*|al respirar|alivi\w*|empeor\w*|lo despierta)\b/,
     'No sabría decirle qué tanto le molesta o qué lo cambia.'],
   [/\b(?:como (?:es|son|era|eran|se ve|se ven|se siente|se sienten)|describ\w*|aspecto|color|forma|tamano|morfologia|pica|rasca|prurito)\b/,
-    /\b(?:roj\w*|rosad\w*|palid\w*|oscur\w*|ampoll\w*|vesicul\w*|erosion\w*|costra\w*|tenue\w*|agrupad\w*|elevad\w*|plan\w*|pic\w*|prurito|doloros\w*|irrit\w*|seca|humeda|espes\w*|verdos\w*|dolor punzante|bultos? (?:duros?|blandos?))\b/,
+    /\b(?:roj\w*|rosad\w*|palid\w*|oscur\w*|morad\w*|ampoll\w*|vesicul\w*|erosion\w*|costra\w*|tenue\w*|agrupad\w*|elevad\w*|plan\w*|pic\w*|prurito|doloros\w*|irrit\w*|seca|humeda|espes\w*|verdos\w*|amarill\w*|bilis|bilios\w*|alimentari\w*|restos de comida|comida sin digerir|en (?:proyectil|chorro)|acuos\w*|con sangre|sin sangre|dolor punzante|bultos? (?:duros?|blandos?))\b/,
     'No me fijé bien en ese detalle.'],
 ];
 const associatedQuestion = /\b(?:(?:algun(?:os)? |alguna(?:s)? )?otr[oa]s? (?:sintomas?|molestias?)|(?:que|algo) mas (?:ha (?:notado|tenido)|le pasa|le duele|le molesta)|que sintomas? (?:mas|aparte))\b/;
@@ -286,12 +290,14 @@ function latestSymptom(history, opening) {
 export function focusedHistoryReply(currentCase, question, history = [], allowUncertain = true) {
   const text = normalize(question);
   const configured = (currentCase.interview ?? []).map((item) => ({ label: item.question, reply: item.reply }));
-  const facet = detailFacets.find(([pattern]) => pattern.test(text));
+  const facets = detailFacets.filter(([pattern]) => pattern.test(text));
   const explicitTopic = symptomTopic(text);
-  const topic = explicitTopic ?? (facet ? latestSymptom(history, currentCase.opening) : undefined);
+  const asksIllnessOnset = timingQuestion.test(text) && onsetOfIllness.test(text);
+  const topic = explicitTopic ?? (facets.length ? latestSymptom(history, currentCase.opening) : undefined)
+    ?? (asksIllnessOnset ? symptomTopic(normalize(currentCase.opening)) : undefined);
   const target = configured.find(({ label }) => {
     const key = normalize(label);
-    return key === text || (facet && topic && facet[0].test(key) && topic[0].test(key));
+    return key === text || (facets.length === 1 && topic && facets[0][0].test(key) && topic[0].test(key));
   });
   const respond = (reply) => [social(question).prefix, reply].filter(Boolean).join(' ');
   if (target) return respond(target.reply);
@@ -321,22 +327,25 @@ export function focusedHistoryReply(currentCase, question, history = [], allowUn
       return respond('Cuando se siente bien, suele jugar en casa.');
     }
   }
-  if (!facet) {
+  if (!facets.length) {
     if (!explicitTopic || !symptomQuestion.test(text)) return null;
     const source = topicClauses(currentCase, explicitTopic[1])[0];
     if (source) return respond(asSentence(source));
     return allowUncertain ? respond('No sabría confirmarle si le ha pasado eso.') : null;
   }
-  const [, describes, fallback] = facet;
   const observed = topic && visibleSymptoms.includes(topic[0]) ? currentCase.interactions.filter(({ group }) => group === 'exploracion') : [];
-  const matches = topic ? topicClauses(currentCase, topic[1], describes, observed, (label, part) =>
-    topic[1].test(label) && !symptomFacts.some((other) => other !== topic && other[1].test(label))
-      && !visibleSymptoms.some((other) => other !== topic[0] && other.test(part)))
-    .filter((part) => describes.test(normalize(part))) : [];
-  const asksFirstLocation = facet === detailFacets[0] && /\b(?:empez|comenz|inicio|primero)/.test(text);
-  const supported = asksFirstLocation ? matches.find((part) => /\b(?:empez\w*|comenz\w*|primero|inicio)\b/.test(normalize(part))) : matches[0];
-  if (supported) return respond(asSentence(supported));
-  if (explicitTopic && allowUncertain) return respond(fallback);
+  const details = facets.map(([pattern, describes, fallback]) => {
+    const matches = topic ? topicClauses(currentCase, topic[1], describes, observed, (label, part) =>
+      topic[1].test(label) && !symptomFacts.some((other) => other !== topic && other[1].test(label))
+        && !visibleSymptoms.some((other) => other !== topic[0] && other.test(part)))
+      .filter((part) => describes.test(normalize(part))) : [];
+    const asksFirstLocation = pattern === detailFacets[0][0] && /\b(?:empez|comenz|inicio|primero)/.test(text);
+    const supported = asksFirstLocation ? matches.find((part) => /\b(?:empez\w*|comenz\w*|primero|inicio)\b/.test(normalize(part))) : matches[0];
+    if (supported) return asSentence(supported);
+    if (topic && facets.length > 1 || allowUncertain && (explicitTopic || asksIllnessOnset)) return fallback;
+    return '';
+  }).filter(Boolean);
+  if (details.length) return respond([...new Set(details)].join(' '));
   return null;
 }
 
