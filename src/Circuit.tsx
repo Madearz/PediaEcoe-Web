@@ -10,7 +10,7 @@ import { scene } from './App';
 import { canListen, canSpeak, listenForQuestion, playSpeech, speak, useVoice } from './voice';
 import { createVoiceCall, type CallPhase, type CallState } from './voice-call';
 import { PHASES, SINGLE, STATION_MS, structured, type CaseData, type Grade, type Group, type Interaction } from '../shared/clinical.mjs';
-import { PATIENT_HISTORY_LIMIT } from '../shared/dialogue.mjs';
+import { isVaccinationCardRequest, patientHistoryReply, PATIENT_HISTORY_LIMIT, vaccinationCard } from '../shared/dialogue.mjs';
 import { EXAM_AREAS, examAreas, requestedExam, systemExam, type ExamArea } from '../shared/exam.mjs';
 import { displayStoredStudy, MISSING_STUDY_VALUE, requestedStudies, studySuggestions, type StudyFinding } from '../shared/studies.mjs';
 import { FOLLOW_UP, JUSTIFICATION_LIMIT, registerAnamnesis, type FollowUp } from '../shared/learning.mjs';
@@ -91,6 +91,8 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
   const suggestedStudies = useMemo(() => studySuggestions(station, caseId), [station, caseId]);
   const [time, setTime] = useState(() => clockInfo.pausedRemaining ?? Math.max(0, clockInfo.deadline - clockInfo.serverNow));
   const [tab, setTab] = useState(false);
+  const [cardOpen, setCardOpen] = useState(false);
+  const card = useMemo(() => vaccinationCard(station), [station]);
   const [turns, setTurns] = useState<Turn[]>([]);
   const transcript = useRef<Turn[]>([]);
   const textRequest = useRef<AbortController | null>(null);
@@ -226,9 +228,28 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
     transcript.current = [...transcript.current.slice(-29), turn];
     setTurns(transcript.current);
   }
+  function registerQuestion(question: string) {
+    const matched = registerAnamnesis(station.interactions, question, evidence.current);
+    evidence.current = matched.evidence;
+    saveDraft('anamnesis', JSON.stringify(matched.evidence));
+    const newlyRegistered = matched.registered.filter((id) => !selectedRef.current.includes(id));
+    if (newlyRegistered.length) {
+      recordSelections(newlyRegistered);
+      setRegistered(newlyRegistered);
+    }
+  }
   async function requestAnswer(question: string, signal: AbortSignal) {
     signal.throwIfAborted();
     if (!canInteract || submitting.current) throw new Error('La estación no está activa.');
+    if (isVaccinationCardRequest(question)) {
+      const reply = patientHistoryReply(station, question);
+      if (reply) {
+        setCardOpen(true);
+        registerQuestion(question);
+        addTurn({ question, reply, mode: 'structured' });
+        return reply;
+      }
+    }
     const studies = requestedStudies(station, question, caseId);
     const exam = requestedExam(station.interactions, question);
     if (studies || exam) {
@@ -265,14 +286,7 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
       answer = { mode: 'structured', reply: structured(station, question, history) };
     }
     signal.throwIfAborted();
-    const matched = registerAnamnesis(station.interactions, question, evidence.current);
-    evidence.current = matched.evidence;
-    saveDraft('anamnesis', JSON.stringify(matched.evidence));
-    const newlyRegistered = matched.registered.filter((id) => !selectedRef.current.includes(id));
-    if (newlyRegistered.length) {
-      recordSelections(newlyRegistered);
-      setRegistered(newlyRegistered);
-    }
+    registerQuestion(question);
     addTurn({ question, ...answer });
     return answer.reply;
   }
@@ -368,6 +382,25 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
               maxLength={400} value={text} disabled={!canInteract} onChange={(event) => setText(event.target.value)}/>
             <button className="button primary" aria-label="Enviar pregunta" disabled={!canInteract || callActive || voice.listening || sending || saving || !text.trim()}><Send size={18}/></button>
           </form>
+          <button type="button" className="button secondary vaccination-toggle" aria-expanded={cardOpen}
+            aria-controls="station-vaccination-card" disabled={!canInteract || saving || sending || (!cardOpen && callActive)} onClick={() => {
+              if (cardOpen) { setCardOpen(false); return; }
+              void requestAnswer('¿Puedo ver el carné de vacunación?', new AbortController().signal).then((reply) => {
+                if (audio && !voice.listening) speak(reply);
+              }).catch((failure) => setError(messageOf(failure)));
+            }}><ClipboardList size={17}/>{cardOpen ? 'Cerrar carné' : 'Solicitar carné de vacunación'}</button>
+          {cardOpen && <section id="station-vaccination-card" className="vaccination-card" aria-label="Carné de vacunación simulado">
+            <h3><ClipboardList size={19}/> Carné de vacunación</h3>
+            <small>Documento simulado de la estación</small>
+            {!card ? <p role="status">No hay carné disponible en esta consulta.</p> : <>
+              {card.summary && <p>{card.summary}</p>}
+              {card.doses.length ? <div className="vaccination-table"><table>
+                <thead><tr><th scope="col">Vacuna</th><th scope="col">Dosis</th><th scope="col">Fecha</th></tr></thead>
+                <tbody>{card.doses.map((row, index) => <tr key={index}><th scope="row">{row.vaccine}</th>
+                  <td>{row.dose || '—'}</td><td>{row.date ? row.date.split('-').reverse().join('/') : '—'}</td></tr>)}</tbody>
+              </table></div> : <p>El caso tiene un resumen general del esquema.</p>}
+            </>}
+          </section>}
           {registered.length > 0 && <p className="notice" role="status">
             Anamnesis registrada · {station.interactions.filter(({ id }) => registered.includes(id)).map(({ label }) => label).join(' · ')}
           </p>}

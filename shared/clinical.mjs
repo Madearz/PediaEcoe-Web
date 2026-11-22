@@ -18,6 +18,14 @@ export function validStudyResults(results) {
     && new Set(results.map((item) => item.id)).size === results.length;
 }
 
+function validVaccinationCard(card) {
+  return card && (card.summary === '' || short(card.summary, 260))
+    && Array.isArray(card.doses) && card.doses.length <= 24 && Boolean(card.summary || card.doses.length)
+    && card.doses.every((row) => row && short(row.vaccine, 100) && (row.dose === '' || short(row.dose, 60))
+      && (row.date === '' || (/^\d{4}-\d{2}-\d{2}$/.test(row.date) && !Number.isNaN(Date.parse(row.date))
+        && new Date(row.date).toISOString().slice(0, 10) === row.date)));
+}
+
 export function validCase(data, rubric) {
   if (!data || !rubric || !short(data.title, 110) || !short(data.category, 80)
       || !short(data.scenario, 750) || !short(data.opening, 750)
@@ -25,6 +33,9 @@ export function validCase(data, rubric) {
       || !['draft', 'review', 'published'].includes(data.status)
       || (data.curricularGroups !== undefined && !validCurricularGroups(data.curricularGroups))
       || (data.studyResults !== undefined && !validStudyResults(data.studyResults))
+      || (data.interview !== undefined && (!Array.isArray(data.interview) || data.interview.length > 24
+        || !data.interview.every((row) => row && short(row.question, 160) && short(row.reply, 400))))
+      || (data.vaccinationCard !== undefined && !validVaccinationCard(data.vaccinationCard))
       || !Array.isArray(data.interactions) || data.interactions.length < 5 || data.interactions.length > 35
       || !short(rubric.diagnosis, 200) || !short(rubric.reference, 300)
       || (rubric.differentialNote !== undefined && rubric.differentialNote !== '' && !short(rubric.differentialNote, 400))

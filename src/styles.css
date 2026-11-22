@@ -126,6 +126,14 @@ button svg, a svg, label svg { flex: 0 0 auto; }
 .subtitle span { display: grid; place-items: center; color: white; background: #6246d8; min-width: 35px; height: 35px; border-radius: 9px; }
 .subtitle small { display: block; margin-top: .23rem; color: #ded7ff; font-size: .71rem; }
 .dialogue { display: grid; gap: .55rem; padding: .75rem; text-align: center; }
+.vaccination-toggle { justify-self: start; }
+.vaccination-card { min-width: 0; padding: .85rem; text-align: left; border: 1px solid var(--border); border-radius: 12px; background: #fff; }
+.vaccination-card h3 { display: flex; align-items: center; gap: .45rem; color: var(--deep); margin: 0 0 .3rem; }
+.vaccination-table { overflow-x: auto; }
+.vaccination-table table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+.vaccination-table th, .vaccination-table td { text-align: left; padding: .45rem; border-bottom: 1px solid var(--border); }
+.vaccination-table thead th { color: var(--deep); background: #f1edfc; }
+.vaccination-table tbody th { font-weight: 600; }
 .voice-row { display: flex; gap: .55rem; justify-content: center; align-items: center; flex-wrap: wrap; }
 .call-button { min-width: 9.5rem; }
 .call-end { color: white; background: #a22450; border-color: #a22450; }
@@ -165,6 +173,7 @@ textarea { resize: vertical; }
 .study-editor legend { color: var(--deep); font-weight: 650; }
 .study-editor > button { justify-self: start; }
 .study-editor-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); align-items: end; gap: .5rem; }
+.interview-editor-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); align-items: end; gap: .5rem; }
 .study-editor details summary { cursor: pointer; }
 .study-existing { list-style: none; margin: .4rem 0 0; padding: 0; }
 .study-existing li { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem; padding: .5rem 0; border-bottom: 1px solid var(--border); }

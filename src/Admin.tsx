@@ -5,7 +5,7 @@ import { collection, count, doc, deleteDoc, getAggregateFromServer, getDocFromSe
   query, runTransaction, setDoc, sum, writeBatch } from 'firebase/firestore';
 import { database } from './Student';
 import { call, messageOf } from './firebase';
-import { CURRICULAR_GROUPS, DAILY_CIRCUITS_DEFAULT, DAILY_CIRCUITS_MAX, GROUPS, normalizeEmail, readInvitations, validCase, validId, validStudyResults, type CaseData, type CurricularGroup, type Interaction, type Rubric, type StudyResult } from '../shared/clinical.mjs';
+import { CURRICULAR_GROUPS, DAILY_CIRCUITS_DEFAULT, DAILY_CIRCUITS_MAX, GROUPS, normalizeEmail, readInvitations, validCase, validId, validStudyResults, type CaseData, type CurricularGroup, type Interaction, type Rubric, type StudyResult, type VaccinationDose } from '../shared/clinical.mjs';
 import { caseGroups } from '../shared/case-groups.mjs';
 import { formatStudyResult, MISSING_STUDY_VALUE, stationStudySamples } from '../shared/studies.mjs';
 
@@ -187,6 +187,14 @@ function CaseEditor() {
   function addStudy(row: StudyResult) {
     setData((current) => ({ ...current, studyResults: [...(current.studyResults ?? []), row] }));
   }
+  function editDose(index: number, field: keyof VaccinationDose, value: string) {
+    setData((current) => {
+      const card = current.vaccinationCard;
+      if (!card) return current;
+      return { ...current, vaccinationCard: { ...card, doses: card.doses.map((row, position) =>
+        position === index ? { ...row, [field]: value } : row) } };
+    });
+  }
   const reset = (next: CaseData, scoring: Rubric) => {
     setData(next);
     setRubric(scoring);
@@ -232,6 +240,7 @@ function CaseEditor() {
         current = { ...data, interactions: JSON.parse(structure) };
         scoring = { ...rubric, criteria: JSON.parse(criteria), critical: JSON.parse(critical) };
       } catch { throw new Error('Revisa el formato JSON de interacciones, criterios y errores críticos.'); }
+      if (current.vaccinationCard && !current.vaccinationCard.summary.trim() && !current.vaccinationCard.doses.length) delete current.vaccinationCard;
       if (current.studyResults && (!validStudyResults(current.studyResults)
           || current.studyResults.some((item) => formatStudyResult(item) === MISSING_STUDY_VALUE))) {
         throw new Error('Revisa los paraclínicos. Escribe el resultado de cada estudio y, para resultados cuantitativos, el valor numérico.');
@@ -328,6 +337,38 @@ function CaseEditor() {
       </fieldset>
       <label className="wide">Escenario<textarea required maxLength={750} value={data.scenario} onChange={(event) => setData({ ...data, scenario: event.target.value })}/></label>
       <label className="wide">Frase inicial del familiar<textarea required maxLength={750} value={data.opening} onChange={(event) => setData({ ...data, opening: event.target.value })}/></label>
+      <fieldset className="wide study-editor">
+        <legend>Detalles de la entrevista</legend>
+        <p>Escribe preguntas y respuestas en palabras del familiar para ampliar la historia del caso.</p>
+        {(data.interview ?? []).map((item, index) => <div className="interview-editor-row" key={index}>
+          <label>Pregunta<input required maxLength={160} value={item.question} placeholder="¿Dónde notó los ganglios?"
+            onChange={(event) => setData({ ...data, interview: data.interview!.map((row, position) => position === index ? { ...row, question: event.target.value } : row) })}/></label>
+          <label>Respuesta del familiar<textarea required maxLength={400} rows={2} value={item.reply}
+            onChange={(event) => setData({ ...data, interview: data.interview!.map((row, position) => position === index ? { ...row, reply: event.target.value } : row) })}/></label>
+          <button type="button" className="button secondary" disabled={busy} onClick={() => setData({ ...data,
+            interview: data.interview!.filter((_, position) => position !== index),
+          })}>Quitar pregunta</button>
+        </div>)}
+        <button type="button" className="button secondary" disabled={busy || (data.interview?.length ?? 0) >= 24}
+          onClick={() => setData({ ...data, interview: [...(data.interview ?? []), { question: '', reply: '' }] })}><Plus size={16}/> Agregar pregunta</button>
+      </fieldset>
+      <fieldset className="wide study-editor">
+        <legend>Carné de vacunación simulado</legend>
+        <label>Resumen del esquema<textarea rows={2} maxLength={260} value={data.vaccinationCard?.summary ?? ''}
+          onChange={(event) => setData({ ...data, vaccinationCard: { summary: event.target.value, doses: data.vaccinationCard?.doses ?? [] } })}/></label>
+        {data.vaccinationCard?.doses.map((item, index) => <div className="study-editor-row" key={index}>
+          <label>Vacuna<input required maxLength={100} value={item.vaccine} onChange={(event) => editDose(index, 'vaccine', event.target.value)}/></label>
+          <label>Dosis<input maxLength={60} value={item.dose} onChange={(event) => editDose(index, 'dose', event.target.value)}/></label>
+          <label>Fecha<input type="date" min="1900-01-01" max="9999-12-31" value={item.date} onChange={(event) => editDose(index, 'date', event.target.value)}/></label>
+          <button type="button" className="button secondary" disabled={busy} onClick={() => setData({ ...data,
+            vaccinationCard: { ...data.vaccinationCard!, doses: data.vaccinationCard!.doses.filter((_, position) => position !== index) },
+          })}>Quitar dosis</button>
+        </div>)}
+        <button type="button" className="button secondary" disabled={busy || (data.vaccinationCard?.doses.length ?? 0) >= 24}
+          onClick={() => setData({ ...data, vaccinationCard: { summary: data.vaccinationCard?.summary ?? '',
+            doses: [...(data.vaccinationCard?.doses ?? []), { vaccine: '', dose: '', date: '' }],
+          } })}><Plus size={16}/> Agregar dosis</button>
+      </fieldset>
       <fieldset className="wide study-editor">
         <legend>Paraclínicos</legend>
         {studies.map((item) => <div className="study-editor-row" key={item.id}>

@@ -5,7 +5,7 @@ import { generateKeyPair, SignJWT } from 'jose';
 import { ApiError, verifyGoogleToken } from '../worker/firebase.mjs';
 import { createHandler, DailyLimits } from '../worker/index.mjs';
 import { grade, readInvitations, structured, validAnswers, validCase } from '../shared/clinical.mjs';
-import { PATIENT_HISTORY_LIMIT, socialReply } from '../shared/dialogue.mjs';
+import { isVaccinationCardRequest, PATIENT_HISTORY_LIMIT, socialReply, vaccinationCard } from '../shared/dialogue.mjs';
 import { caseGroups } from '../shared/case-groups.mjs';
 import { examAreas, requestedExam, systemExam } from '../shared/exam.mjs';
 import { practiceFocus, registerAnamnesis } from '../shared/learning.mjs';
@@ -351,12 +351,59 @@ test('la entrevista conserva el personaje y descarta respuestas repetidas al cam
     LIMITS: { getByName: () => ({ fetch: async () => new Response(null, { status: 204 }) }) } };
   const ask = async (question) => (await app(call('/circuits/circuit-id/dialogue', { question, history }), env)).json();
   for (response of ['No se detectaron comportamientos inadecuados.', 'Puede reformular su pregunta.', data.opening, history[0].reply]) {
-    assert.deepEqual(await ask('¿Tiene tos?'), { mode: 'structured', reply: 'Empezó a toser ayer.' });
+    assert.deepEqual(await ask('¿Algo del jardín?'), { mode: 'structured', reply: 'No sabría precisarlo. Le puedo contar lo que sí he observado.' });
   }
+  assert.deepEqual(await ask('¿Tiene tos?'), { mode: 'structured', reply: 'Empezó a toser ayer.' });
   assert.deepEqual(await ask('¿Tiene las vacunas al día?'), { mode: 'structured', reply: 'Le faltan algunas vacunas.' });
-  assert.deepEqual(await ask('¿Dónde empezó la erupción?'), { mode: 'ai', reply: history[0].reply });
+  assert.deepEqual(await ask('¿Dónde empezó la erupción?'), { mode: 'structured', reply: history[0].reply });
   response = 'En casa ha estado más irritable.';
   assert.deepEqual(await ask('¿Cómo se ha comportado en casa?'), { mode: 'ai', reply: response });
+});
+
+test('el carné distingue un resumen de las dosis y fechas registradas', () => {
+  const { data, rubric } = example[0];
+  const vaccine = { ...data, interactions: [...data.interactions, { id: 'vacunas', group: 'anamnesis', label: 'Vacunas', reply: 'Vacunación incompleta.' }] };
+  assert.equal(isVaccinationCardRequest('¿Tiene el carné?'), true);
+  assert.equal(isVaccinationCardRequest('¿Está vacunado?'), false);
+  assert.equal(vaccinationCard(data), null);
+  assert.match(structured(data, '¿Me muestra el carné?'), /No traje el carné/);
+  assert.deepEqual(vaccinationCard(vaccine), { summary: 'Le faltan algunas vacunas.', doses: [] });
+  const dose = { vaccine: 'Triple viral (sarampión, rubéola y paperas)', dose: 'Primera dosis', date: '2025-03-07' };
+  const recorded = { ...data, vaccinationCard: { summary: '', doses: [dose] } };
+  assert.equal(validCase(recorded, rubric), true);
+  assert.equal(validCase({ ...recorded, vaccinationCard: { summary: '', doses: [{ ...dose, date: '2025-02-31' }] } }, rubric), false);
+  assert.deepEqual(vaccinationCard(recorded), recorded.vaccinationCard);
+  assert.match(structured(recorded, '¿Tiene la vacuna contra el sarampión?'), /Triple viral/);
+});
+
+test('la anamnesis encadena detalles del síntoma, otros síntomas y medicamentos', () => {
+  const currentCase = { scenario: 'Paciente simulado de 7 años.', opening: 'Le salió un sarpullido.', interactions: [
+    { group: 'anamnesis', label: 'Inicio y curso', reply: 'El brote empezó ayer en la cara.' },
+    { group: 'anamnesis', label: 'Síntomas asociados', reply: 'Tuvo fiebre anoche.' },
+    { group: 'anamnesis', label: 'Tratamiento', reply: 'Antes tomaba hierro. Hoy tomó paracetamol.' },
+    { group: 'anamnesis', label: 'Antecedentes familiares', reply: 'Su papá tiene asma.' },
+    { group: 'anamnesis', label: 'Hospitalizaciones previas', reply: 'Estuvo hospitalizado por una infección.' },
+    { group: 'exploracion', label: 'Piel y ganglios', reply: 'Se ven manchas rojizas en el tronco. Adenopatías detrás de las orejas.' },
+  ] };
+  const question = '¿Cómo es el sarpullido?';
+  assert.equal(structured(currentCase, question), 'Se ven manchas rojizas en el tronco.');
+  assert.equal(structured(currentCase, '¿Dónde empezó?', [{ question }]), 'El brote empezó ayer en la cara.');
+  assert.equal(structured(currentCase, '¿Dónde tiene las adenopatías?'), 'Adenopatías detrás de las orejas.');
+  assert.equal(structured(currentCase, '¿Tiene algún otro síntoma?'), 'Tuvo fiebre anoche.');
+  assert.equal(structured(currentCase, '¿Ya ha estado hospitalizado?'), 'Estuvo hospitalizado por una infección.');
+  assert.equal(structured(currentCase, '¿Tiene antecedentes familiares?'), 'Su papá tiene asma.');
+  assert.equal(structured(currentCase, 'En la revisión por sistemas, ¿algo más?', [{ question: '¿Tiene fiebre?', reply: 'Tuvo fiebre anoche.' }]),
+    'Por ahora, eso es lo que más me preocupa.');
+  const medication = { question: '¿Toma medicamentos?' };
+  assert.equal(structured(currentCase, 'Por los de antes', [medication]), 'Antes tomaba hierro.');
+  assert.equal(structured(currentCase, 'Por los de hoy', [medication, { question: 'Por los de antes' }]), 'Hoy tomó paracetamol.');
+  assert.equal(structured(currentCase, '¿El niño juega o practica algún deporte?'), 'Cuando se siente bien, suele jugar en casa.');
+  const pain = { ...currentCase, opening: 'Tiene dolor en el pecho.', interview: [
+    { question: '¿Dónde siente el dolor?', reply: 'Me señala el lado izquierdo del pecho.' },
+    { question: '¿Qué pasa si se acuesta?', reply: 'Me dice que le duele más cuando se acuesta.' },
+  ] };
+  assert.equal(structured(pain, '¿En qué parte le duele?'), 'Me señala el lado izquierdo del pecho.');
+  assert.equal(structured(pain, '¿Qué pasa si se acuesta?'), 'Me dice que le duele más cuando se acuesta.');
 });
 
 test('Worker rechaza puntajes del navegador, calcula y guarda con precondiciones', async () => {

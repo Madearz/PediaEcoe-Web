@@ -1,8 +1,11 @@
-import type { CaseData } from './clinical.mjs';
+import type { CaseData, VaccinationCard } from './clinical.mjs';
 export const PATIENT_HISTORY_LIMIT: number;
 export function patientAge(data: CaseData): string | undefined;
 export function patientBackgroundReply(data: CaseData, question: string): string | null;
 export function patientHistoryReply(data: CaseData, question: string, history?: { question: string }[]): string | null;
 export function patientReplyFits(data: CaseData, question: string, reply: string, history?: { question: string; reply?: string }[]): boolean;
+export function focusedHistoryReply(data: CaseData, question: string, history?: { question: string; reply?: string }[], allowUncertain?: boolean): string | null;
+export function isVaccinationCardRequest(question: string): boolean;
+export function vaccinationCard(data: CaseData): VaccinationCard | null;
 export function socialReply(question: string): string | null;
 export function structured(data: CaseData, question: string, history?: { question: string; reply?: string }[]): string;
