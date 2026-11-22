@@ -5,11 +5,18 @@ const metabolic = /diabetes|gluc|metabol|cetona|deshidrat|somnolen|ayuno|convuls
 const chest = /respirat|pulmon|neumon|sibilan|asma|tos\b|estridor|saturacion|taquipnea|torax|cardiac|cardiovasc|corazon/;
 const fever = /fiebre|febril|infect|sepsis|inflama|exantema|dengue|malaria/;
 const electrolytes = /electrol|sodio|potasio|diur[ée]tic|arritmia|vomit|diarre|metabol|deshidrat|neonat|recien nacido/;
+const anemia = /anemia|ferropeni|microcitos|hematolog|hemoglobin|palidez|sangrad|hemorrag|fatiga|falciform/;
 
 const studies = [
   { id: 'hemograma', label: 'Hemograma', aliases: /(?:hemograma|cuadro hematico|biometria hematica|conteo sanguineo)/,
-    related: [fever, /anemia|sangrad|hematolog|hemorrag|petequia|palidez|purpura|fatiga|falciform|neumon/],
+    related: [fever, anemia, /petequia|purpura|neumon/],
     normal: 'Hemoglobina, leucocitos y plaquetas dentro de los intervalos esperados para la edad.' },
+  { id: 'hemoglobina', label: 'Hemoglobina', aliases: /(?:hemoglobina|hb)/,
+    related: [anemia], normal: 'Hemoglobina dentro del intervalo esperado para la edad.' },
+  { id: 'vcm', label: 'Volumen corpuscular medio', aliases: /(?:volumen corpuscular medio|vcm)/,
+    related: [anemia], normal: 'Volumen corpuscular medio dentro del intervalo esperado para la edad.' },
+  { id: 'ferritina', label: 'Ferritina', aliases: /(?:ferritina|perfil de hierro)/,
+    related: [anemia, fever], normal: 'Ferritina dentro del intervalo de referencia del laboratorio.' },
   { id: 'glucosa', label: 'Glucosa', aliases: /(?:glucemia|glicemia|glucometria|glucosa)/,
     related: [metabolic], normal: 'Glucosa 90 mg/dL.' },
   { id: 'sodio', label: 'Sodio', aliases: /sodio/, related: [renal, electrolytes], normal: 'Sodio 140 mmol/L.' },
@@ -45,13 +52,41 @@ const studies = [
     related: [/neuro|cefalea|convulsion|focalidad|trauma|encefal|conciencia|cefalo/], normal: null },
 ];
 
-const studyRequest = /\b(solicit\w*|pedir|pido|ordeno|ordenar|quisiera|quiero|dame|muestr\w*|resultados?|paraclinic[oa]s?|realiz\w*|me (?:da|dice|indica)|tom\w*|mido|hacer|como (?:esta|salio)|cual (?:es|fue))\b/;
+const studyRequest = /\b(solicit\w*|pedir|pido|ordeno|ordenar|quisiera|quiero|dame|muestr\w*|resultados?|paraclinic[oa]s?|realiz\w*|me (?:da|dice|indica)|tom\w*|mido|hacer|como (?:esta|salio)|cual (?:es|fue)|cuanto (?:tiene|mide|dio|salio|es)|cuanta hemoglobina|(?:nivel|valor) de|esta (?:baj[oa]|alt[oa]|normal))\b/;
+
+// Datos ficticios de esta estación. El caso original registra microcitosis persistente.
+const ironFollowUp = {
+  hemograma: 'Hemoglobina 9,6 g/dL (baja) y VCM 68 fL (bajo). Persiste la microcitosis.',
+  hemoglobina: 'Hemoglobina 9,6 g/dL (baja para la edad).',
+  vcm: 'VCM 68 fL (bajo para la edad).',
+  ferritina: 'Ferritina 8 ng/mL (baja).',
+};
+
+function stationStudyResults(data, caseId) {
+  return caseId === 'practica100-ferropenia-sin-respuesta'
+    || normalizeClinicalRequest(data.title) === 'anemia sin mejoria durante un tratamiento indicado' ? ironFollowUp : {};
+}
 
 function matchesStudy(study, text) {
   return new RegExp(`\\b${study.aliases.source}\\b`).test(text);
 }
 
-export function requestedStudies(data, question) {
+function studyContext(data, interactions = data.interactions) {
+  return normalizeClinicalRequest([data.title, data.category, data.scenario, data.opening,
+    ...interactions.map((item) => item.label + ' ' + item.reply)].join(' '));
+}
+
+export function studySuggestions(data, caseId) {
+  const results = stationStudyResults(data, caseId);
+  const context = studyContext(data, data.interactions.filter((item) => !['razonamiento', 'acciones', 'cierre'].includes(item.group)));
+  const existing = data.interactions.filter((item) => item.group === 'paraclinicos');
+  const available = studies.filter((item) => !existing.some((entry) => matchesStudy(item, normalizeClinicalRequest(entry.label))));
+  const curated = available.filter((item) => Object.hasOwn(results, item.id));
+  if (curated.length) return curated.filter((item) => item.id !== 'vcm').slice(0, 3);
+  return available.filter((item) => item.related.some((pattern) => pattern.test(context))).slice(0, 3);
+}
+
+export function requestedStudies(data, question, caseId) {
   const text = normalizeClinicalRequest(question);
   const requested = studies.filter((study) => matchesStudy(study, text));
   const explicit = studyRequest.test(text);
@@ -59,7 +94,7 @@ export function requestedStudies(data, question) {
   const documented = data.interactions.filter((item) => item.group === 'paraclinicos' && item.reply
     && (text === normalizeClinicalRequest(item.label)
       || (generic && !requested.length)
-      || requested.some((study) => matchesStudy(study, normalizeClinicalRequest(item.label)))));
+      || requested.some((study) => matchesStudy(study, normalizeClinicalRequest(item.label + ' ' + item.reply)))));
   const remainder = requested.reduce((current, study) =>
     current.replace(new RegExp(`\\b${study.aliases.source}\\b`, 'g'), ' '), text);
   const bare = requested.length > 0 && /^(?:(?:y|o|el|la|los|las|un|una|por favor)\b\s*|\s+)*$/.test(remainder);
@@ -67,19 +102,20 @@ export function requestedStudies(data, question) {
   if (!requested.length && !documented.length && !generic
       && !/\b(hemocultivos?|cultivos?|radiografias?|ecografias?|tomografias?|resonancia|prueba de laboratorio)\b/.test(text)) return null;
 
-  const stored = new Set(documented.map((item) => normalizeClinicalRequest(item.label)));
-  const context = normalizeClinicalRequest([data.title, data.category, data.scenario, data.opening,
-    ...data.interactions.map((item) => item.label + ' ' + item.reply)].join(' '));
+  const stored = documented.map((item) => normalizeClinicalRequest(item.label + ' ' + item.reply));
+  const context = studyContext(data);
+  const results = stationStudyResults(data, caseId);
   const supplemental = [];
   for (const study of requested) {
-    if ([...stored].some((label) => matchesStudy(study, label))) continue;
+    if (stored.some((label) => matchesStudy(study, label))) continue;
     const includedInExam = data.interactions.find((item) => item.group === 'exploracion' && item.reply
       && matchesStudy(study, normalizeClinicalRequest(item.reply)));
-    const normal = !includedInExam && !study.related.some((pattern) => pattern.test(context)) ? study.normal : null;
+    const caseResult = includedInExam?.reply ?? results[study.id];
+    const normal = !caseResult && !study.related.some((pattern) => pattern.test(context)) ? study.normal : null;
     supplemental.push({
       id: study.id, label: study.label,
-      reply: includedInExam?.reply ?? (normal || 'El caso no trae un resultado para este estudio.'),
-      kind: includedInExam ? 'case' : normal ? 'simulated' : 'unavailable',
+      reply: caseResult ?? (normal || 'El caso no trae un resultado para este estudio.'),
+      kind: caseResult ? 'case' : normal ? 'simulated' : 'unavailable',
     });
   }
   if (!documented.length && !supplemental.length) {

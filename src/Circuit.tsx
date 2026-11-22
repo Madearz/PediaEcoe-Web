@@ -12,9 +12,9 @@ import { createVoiceCall, type CallPhase, type CallState } from './voice-call';
 import { PHASES, SINGLE, STATION_MS, structured, type CaseData, type Grade, type Group, type Interaction } from '../shared/clinical.mjs';
 import { PATIENT_HISTORY_LIMIT } from '../shared/dialogue.mjs';
 import { EXAM_AREAS, examAreas, requestedExam, type ExamArea } from '../shared/exam.mjs';
-import { requestedStudies, type StudyFinding } from '../shared/studies.mjs';
+import { requestedStudies, studySuggestions, type StudyFinding } from '../shared/studies.mjs';
 
-type Session = { id: string; index: number; complete: boolean; case: CaseData | null; titles: string[]; deadline: number | null; serverNow: number };
+type Session = { id: string; index: number; complete: boolean; case: CaseData | null; caseIds?: string[]; titles: string[]; deadline: number | null; serverNow: number };
 type Turn = { question: string; reply: string; mode: 'structured'|'ai'; clinical?: boolean };
 type SupplementalFinding = StudyFinding & { group: 'exploracion'|'paraclinicos' };
 const turnLabel = (turn: Turn) => turn.clinical ? 'Resultado de la estación' : turn.mode === 'ai' ? 'IA generativa' : 'Respuesta estructurada';
@@ -33,6 +33,7 @@ const examIcons: Record<ExamArea, LucideIcon> = {
 
 function Station({ user, session, onSaved }: { user: User; session: Session; onSaved: (resultId: string) => void }) {
   const station = session.case!;
+  const caseId = session.caseIds?.[session.index];
   const deadline = session.deadline!;
   const storageKey = `pediaecoe:${user.uid}:${session.id}:${session.index}`;
   const [selected, setSelected] = useState<string[]>(() => {
@@ -48,6 +49,7 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
   const examOptions = useMemo(() => station.interactions.filter((item) => item.group === 'exploracion').map((item) => ({
     ...item, areas: examAreas(item.label),
   })), [station.interactions]);
+  const suggestedStudies = useMemo(() => studySuggestions(station, caseId), [station, caseId]);
   const [time, setTime] = useState(() => Math.max(0, deadline - session.serverNow));
   const [tab, setTab] = useState(false);
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -129,7 +131,7 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
   }
   async function requestAnswer(question: string, signal: AbortSignal) {
     signal.throwIfAborted();
-    const studies = requestedStudies(station, question);
+    const studies = requestedStudies(station, question, caseId);
     const exam = requestedExam(station.interactions, question);
     if (studies || exam) {
       if (time <= 0 || submitting.current) throw new Error('La estación ya terminó.');
@@ -273,7 +275,18 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
             {requested && <small><CircleCheck size={14} aria-hidden="true"/>{tool === 'acciones' ? 'Seleccionada' : 'Solicitado'}</small>}
           </button>;
         })}
-          {!toolOptions.length && <p>{tool === 'paraclinicos' ? 'Puedes solicitar un estudio por su nombre en la conversación.' : `Este caso no incluye ${tool === 'exploracion' ? 'hallazgos de examen físico' : 'acciones'} en esta sección.`}</p>}</div>
+          {!toolOptions.length && tool !== 'paraclinicos' && <p>{`Este caso no incluye ${tool === 'exploracion' ? 'hallazgos de examen físico' : 'acciones'} en esta sección.`}</p>}</div>
+        {tool === 'paraclinicos' && <div className="study-suggestions">
+          {suggestedStudies.length > 0 && <>
+            <p>Ejemplos para esta estación</p>
+            <div className="option-list">{suggestedStudies.map((study) => <button type="button" key={study.id}
+              className="button secondary" disabled={saving || !time} onClick={() => {
+                void requestAnswer(`Solicito ${study.label}`, new AbortController().signal)
+                  .catch((failure) => setError(messageOf(failure)));
+              }}>{study.label}</button>)}</div>
+          </>}
+          <small>También puedes pedir estudios por su nombre en la conversación.</small>
+        </div>}
         <div className="findings"><h3><ClipboardList size={19}/> Hallazgos solicitados</h3>
           <span className="sr-only" role="status">{latestFinding && findings.find((item) => item.id === latestFinding)?.reply}</span>
           {findings.length ? <ul className="findings-list">{findings.map((item) => <li key={item.id} className={item.id === latestFinding ? 'latest' : ''}>

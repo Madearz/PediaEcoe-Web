@@ -8,7 +8,7 @@ import { grade, readInvitations, structured, validAnswers, validCase } from '../
 import { PATIENT_HISTORY_LIMIT, socialReply } from '../shared/dialogue.mjs';
 import { caseGroups } from '../shared/case-groups.mjs';
 import { examAreas, requestedExam } from '../shared/exam.mjs';
-import { requestedStudies } from '../shared/studies.mjs';
+import { requestedStudies, studySuggestions } from '../shared/studies.mjs';
 import { readFile } from 'node:fs/promises';
 
 const bearer = { Authorization: 'Bearer a.b.c', 'Content-Type': 'application/json' };
@@ -67,6 +67,21 @@ test('los paraclínicos priorizan el resultado del caso y solo simulan normalida
     { label: 'Glucosa', id: 'glucosa', kind: 'case', reply: 'Glucemia baja y somnolencia.' });
   assert.equal(requestedStudies(respiratory, '¿Le hicieron una radiografía de tórax antes de venir?'), null);
   assert.equal(requestedStudies(respiratory, '¿Tiene tos?'), null);
+});
+
+test('la estación de anemia ofrece estudios pertinentes y reconoce la hemoglobina por su nombre', () => {
+  const data = { title: 'Anemia sin mejoría durante un tratamiento indicado', category: 'Hematología',
+    scenario: 'Paciente simulado de 5 años', opening: 'Sigue cansado.', interactions: [
+      { group: 'exploracion', label: 'Tendencia del hemograma', reply: 'Persiste microcitosis.' },
+    ] };
+  assert.deepEqual(studySuggestions(data).map((item) => item.label), ['Hemograma', 'Hemoglobina', 'Ferritina']);
+  assert.deepEqual(requestedStudies(data, '¿Cuánto tiene de hemoglobina?').supplemental[0],
+    { id: 'hemoglobina', label: 'Hemoglobina', kind: 'case', reply: 'Hemoglobina 9,6 g/dL (baja para la edad).' });
+  assert.match(requestedStudies(data, 'Solicito Hemograma').supplemental[0].reply, /VCM 68 fL/);
+  assert.equal(requestedStudies(data, 'Pido ferritina').supplemental[0].kind, 'case');
+  assert.equal(requestedStudies(data, 'Pido sodio').supplemental[0].kind, 'simulated');
+  const documented = { id: 'lab', group: 'paraclinicos', label: 'Hemograma', reply: 'Hemoglobina 8,8 g/dL.' };
+  assert.deepEqual(requestedStudies({ ...data, interactions: [documented] }, '¿Cuál es la Hb?').documented, [documented]);
 });
 
 test('tres borradores válidos y evaluación con decisiones mutuamente excluyentes', () => {
