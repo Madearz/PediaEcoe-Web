@@ -1,7 +1,8 @@
 {
   "indexes": [
     {"collectionGroup":"simulation_sessions","queryScope":"COLLECTION","fields":[{"fieldPath":"uid","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]},
-    {"collectionGroup":"station_results","queryScope":"COLLECTION","fields":[{"fieldPath":"uid","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]}
+    {"collectionGroup":"station_results","queryScope":"COLLECTION","fields":[{"fieldPath":"uid","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]},
+    {"collectionGroup":"student_progress","queryScope":"COLLECTION","fields":[{"fieldPath":"circuits","order":"ASCENDING"},{"fieldPath":"stations","order":"ASCENDING"},{"fieldPath":"totalScore","order":"ASCENDING"}]}
   ],
   "fieldOverrides": [
     {"collectionGroup":"case_rubrics","fieldPath":"criteria","indexes":[]},

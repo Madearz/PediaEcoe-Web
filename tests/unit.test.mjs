@@ -275,6 +275,30 @@ test('las vacunas y el seguimiento «antes» se mantienen en el tema solicitado'
   assert.equal(structured(medicine, '¿Tomó ibuprofeno?'), 'No recuerdo si tomó ese medicamento.');
 });
 
+test('la entrevista interpreta muletillas y preguntas cortas según el tema anterior', () => {
+  const currentCase = { opening: 'Empezó con tos.', interactions: [
+    { group: 'anamnesis', label: 'Inicio de la tos', reply: 'Empezó anoche.' },
+    { group: 'anamnesis', label: 'Síntomas asociados', reply: 'También tuvo fiebre ayer.' },
+    { group: 'anamnesis', label: 'Antecedentes personales', reply: 'Tiene asma desde pequeño.' },
+    { group: 'anamnesis', label: 'Antecedentes médicos', reply: 'Desde hace un año le controlan la anemia.' },
+    { group: 'anamnesis', label: 'Medicamentos', reply: 'Antes tomaba hierro. Hoy tomó paracetamol.' },
+  ] };
+  const first = 'Ajá, ¿y sufre de algo más?';
+  const asthma = 'Tiene asma desde pequeño.';
+  const anemia = 'Desde hace un año le controlan la anemia.';
+  for (const phrase of [first, 'a ver y ya tenia algo de base', 'bueno y padece algo mas', '¿Tenía alguna otra enfermedad aparte de esto?']) {
+    assert.equal(structured(currentCase, phrase), asthma);
+  }
+  const background = [{ question: first, reply: asthma }, { question: 'Ajá', reply: 'Sí, le escucho.' }];
+  assert.equal(structured(currentCase, 'Bueno y algo más', background), anemia);
+  assert.equal(structured(currentCase, '¿Y alguna otra cosa?', [...background, { question: 'Bueno y algo más', reply: anemia }]),
+    'Por ahora, eso es lo que sé de sus antecedentes.');
+  assert.equal(structured(currentCase, 'Ajá, ¿y qué más?', [{ question: '¿Por qué vino?', reply: currentCase.opening }]),
+    'También tuvo fiebre ayer.');
+  assert.equal(structured(currentCase, 'Ah bueno y desde cuándo', [{ question: '¿Tiene tos?', reply: 'Sí, tose.' }]), 'Empezó anoche.');
+  assert.equal(structured(currentCase, 'A ver y por los de antes', [{ question: '¿Toma medicamentos?' }]), 'Antes tomaba hierro.');
+});
+
 test('Worker bloquea IA para cuenta anónima, sin invitación, revocada o circuito ajeno', async () => {
   let invitation = 'missing';
   let uid = 'other';

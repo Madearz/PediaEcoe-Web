@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { ClipboardList, Plus, ShieldCheck, Trash2, Upload, Users } from 'lucide-react';
+import { FirebaseError } from 'firebase/app';
 import type { User } from 'firebase/auth';
 import { collection, count, doc, deleteDoc, getAggregateFromServer, getDocFromServer, getDocsFromServer, limit, orderBy,
   query, runTransaction, setDoc, sum, writeBatch } from 'firebase/firestore';
@@ -414,14 +415,29 @@ function CaseEditor() {
   </section>;
 }
 
+async function progressSummary() {
+  const progress = collection(database, 'student_progress');
+  try {
+    return (await getAggregateFromServer(progress, { submitted: sum('stations'), circuits: sum('circuits'), total: sum('totalScore') })).data();
+  } catch (failure) {
+    if (!(failure instanceof FirebaseError) || failure.code !== 'failed-precondition' || !/index/i.test(failure.message)) throw failure;
+    const [stations, circuits, scores] = await Promise.all([
+      getAggregateFromServer(progress, { submitted: sum('stations') }),
+      getAggregateFromServer(progress, { circuits: sum('circuits') }),
+      getAggregateFromServer(progress, { total: sum('totalScore') }),
+    ]);
+    return { ...stations.data(), ...circuits.data(), ...scores.data() };
+  }
+}
+
 function Statistics() {
   const [stat, setStat] = useState<Stat | null>(null);
   const [error, setError] = useState('');
   useEffect(() => {
     void Promise.all([
       getAggregateFromServer(collection(database, 'users'), { students: count() }),
-      getAggregateFromServer(collection(database, 'student_progress'), { submitted: sum('stations'), circuits: sum('circuits'), total: sum('totalScore') }),
-    ]).then(([users, progress]) => setStat({ ...users.data(), ...progress.data() }))
+      progressSummary(),
+    ]).then(([users, progress]) => setStat({ ...users.data(), ...progress }))
       .catch((failure) => setError(messageOf(failure)));
   }, []);
   return <section className="card admin-section"><h2>Resumen general</h2>

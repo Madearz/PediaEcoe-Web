@@ -1,5 +1,6 @@
 const normalize = (text) => text.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase()
   .replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+const questionText = (text) => normalize(text).replace(/^(?:(?:aja|a ver|ah bueno|ah ya|bueno|entonces|listo|okey|ok|vale|digame|y)(?: |$))+/u, '');
 
 export const PATIENT_HISTORY_LIMIT = 6;
 export const patientAge = (data) => data.scenario?.match(/\bde (\d+ (?:años?|mes(?:es)?|semanas?|días?))\b/i)?.[1];
@@ -16,7 +17,8 @@ const vaccineFact = /\b(vacun\w*|inmuniz\w*|esquema|carne|carnet|dosis de refuer
 const insuranceQuestion = /\b(eps|e p s|entidad promotora de salud|aseguradora|seguro (?:medico|de salud)|afiliaci[oó]n (?:a|en) salud|afiliad[oa]s? (?:a|al|en)|regimen (?:contributivo|subsidiado))\b/;
 const insuranceFact = /\b(eps|e p s|entidad promotora de salud|aseguradora|seguro (?:medico|de salud)|afiliaci[oó]n|afiliad[oa]s?|regimen (?:contributivo|subsidiado))\b/;
 const allergyQuestion = /\b(alergia|alergico|alergica|alergias)\b/;
-const backgroundQuestion = /\b(?:(?:sufre|padece) de algo(?: mas)?|(?:sufre|padece|tiene|ha tenido|le han diagnosticado) (?:de )?alguna enfermedad(?: de base| cronica| previa)?|(?:algun |alguna )antecedentes?(?: (?:personal|medico|patologico)s?)?)(?: doctor| doctora| senor| senora)?$/;
+const backgroundQuestion = /\b(?:(?:sufre|padece) (?:de )?algo(?: mas)?|(?:sufre|padece|tiene|tenia|ha tenido|le han diagnosticado) (?:de )?(?:alguna |otra )*(?:enfermedad|condicion)(?: de base| cronica| previa)?|(?:tiene|tenia|ya tenia) algo (?:de base|de antes)|(?:algun |alguna )antecedentes?(?: (?:personal|medico|patologico)s?)?|(?:hay|tenia|ya tenia) algo que (?:ya )?(?:tuviera|tuviese|tiene|tenia)(?: de antes)?)(?: (?:aparte|ademas) de (?:esto|eso|lo de hoy)| (?:doctor|doctora|senor|senora)| por favor)*$/;
+const moreQuestion = /^(?:algo mas|que mas|hay algo mas|alguna otra cosa|alguna mas)$/;
 const backgroundFact = /\b(?:antecedentes? (?:personales?|medicos?|patologicos?|renales?|cardiacos?|respiratorios?)|comorbilidades?|enfermedades? (?:cronicas?|previas?|de base))\b/;
 const rash = /\b(?:exantema|sarpullido|ronchas?|lesiones?|manchas?|erupcion|granitos?|vesiculas?|costras?)\b/;
 const nodes = /\b(?:adenopatias?|ganglios?|bultos?|bolitas?)\b/;
@@ -115,13 +117,14 @@ function findFact(items, text) {
 }
 
 function social(question) {
-  const text = normalize(question);
+  const text = questionText(question);
+  if (!text && normalize(question)) return { only: 'Sí, le escucho.', prefix: '' };
   const permission = /\b(?:puedo|podria|me permite|permite que|esta bien si|le parece si|te parece si)\s+(?:(?:le|lo|la|me) )?(?:(?:haga|hacerle|hacer) (?:unas? |algunas? )?preguntas?|pregunt\w*|hablar|entrevist\w*|examin\w*|explor\w*|revis\w*|auscult\w*|tomar (?:la )?(?:temperatura|presion))\b/.test(text);
   const asksName = /\b(?:como se llama usted|como te llamas|cual es (?:su|tu) nombre|con quien (?:hablo|tengo el gusto)|quien (?:es usted|eres)|que parentesco)\b/.test(text);
   const checksIn = /\bcomo est(?:a|as)(?: usted)?$/.test(text);
   const clinical = questionSignal.test(text) || openQuestion.test(text) || backgroundQuestion.test(text)
     || vaccineQuestion.test(text) || cardQuestion.test(text) || medicationQuestion.test(text) || insuranceQuestion.test(text)
-    || associatedQuestion.test(text) || systemsQuestion.test(text) || symptomQuestion.test(text) || routineQuestion.test(text)
+    || associatedQuestion.test(text) || moreQuestion.test(text) || systemsQuestion.test(text) || symptomQuestion.test(text) || routineQuestion.test(text)
     || backgroundDetails.some(([question]) => question.test(text)) || detailFacets.some(([question]) => question.test(text))
     || (question.includes('?') && !permission && !asksName && !checksIn);
   if (asksName && !clinical) {
@@ -149,11 +152,17 @@ function social(question) {
 
 export function socialReply(question) { return social(question).only || null; }
 
-export function patientBackgroundReply(currentCase, question) {
-  if (!backgroundQuestion.test(normalize(question))) return null;
-  const fact = currentCase.interactions.find(({ group, label, reply }) => group === 'anamnesis' && reply
-    && (backgroundFact.test(normalize(label)) || backgroundFact.test(normalize(reply))));
-  const reply = fact?.reply ?? 'No que yo sepa. ¿Se refiere a alguna enfermedad en particular?';
+export function patientBackgroundReply(currentCase, question, history = []) {
+  const text = questionText(question);
+  const more = moreQuestion.test(text);
+  const previous = [...history].reverse().find((turn) => !socialReply(turn.question) && !moreQuestion.test(questionText(turn.question)));
+  if (!backgroundQuestion.test(text) && !(more && previous && backgroundQuestion.test(questionText(previous.question)))) return null;
+  const facts = interviewFacts(currentCase).filter(({ label, reply }) =>
+    backgroundQuestion.test(questionText(label)) || backgroundFact.test(normalize(label)) || backgroundFact.test(normalize(reply)));
+  const asksMore = more || /\b(?:mas|otra)\b/.test(text);
+  const fact = facts.find(({ reply }) => !asksMore || !history.some((turn) => turn.reply && normalize(turn.reply).includes(normalize(reply))));
+  const reply = fact?.reply ?? (asksMore && facts.length ? 'Por ahora, eso es lo que sé de sus antecedentes.'
+    : 'No que yo sepa. ¿Se refiere a alguna enfermedad en particular?');
   return [social(question).prefix, reply].filter(Boolean).join(' ');
 }
 
@@ -183,7 +192,7 @@ function asSentence(text) {
 
 function recentMedicationTopic(history) {
   for (const turn of [...history].reverse()) {
-    const text = normalize(turn.question);
+    const text = questionText(turn.question);
     if (allergyQuestion.test(text) || vaccineQuestion.test(text) || cardQuestion.test(text) || insuranceQuestion.test(text)) return '';
     if (medicationQuestion.test(text)) return text;
     if (!socialReply(turn.question) && !beforeChoice.test(text) && !currentChoice.test(text) && !followUp.test(text)) return '';
@@ -209,10 +218,10 @@ function vaccineStatus(value) {
   return asSentence(value);
 }
 
-export function isVaccinationCardRequest(question) { return cardQuestion.test(normalize(question)); }
+export function isVaccinationCardRequest(question) { return cardQuestion.test(questionText(question)); }
 
 export function patientHistoryReply(currentCase, question, history = []) {
-  const text = normalize(question);
+  const text = questionText(question);
   if (allergyQuestion.test(text)) {
     const source = topicClauses(currentCase, /\b(?:alerg\w*|reaccion alergica)\b/)[0];
     const reply = source ? asSentence(source) : 'No sabría confirmarle si tiene alguna alergia. ¿Se refiere a algún medicamento o alimento en particular?';
@@ -279,7 +288,7 @@ function symptomTopic(text) {
 
 function latestSymptom(history, opening) {
   for (const turn of [...history].reverse()) {
-    const text = normalize(turn.question);
+    const text = questionText(turn.question);
     const topic = symptomTopic(text);
     if (topic) return topic;
     if (openQuestion.test(text)) return symptomTopic(normalize(opening));
@@ -288,7 +297,7 @@ function latestSymptom(history, opening) {
 }
 
 export function focusedHistoryReply(currentCase, question, history = [], allowUncertain = true) {
-  const text = normalize(question);
+  const text = questionText(question);
   const configured = (currentCase.interview ?? []).map((item) => ({ label: item.question, reply: item.reply }));
   const facets = detailFacets.filter(([pattern]) => pattern.test(text));
   const explicitTopic = symptomTopic(text);
@@ -296,12 +305,12 @@ export function focusedHistoryReply(currentCase, question, history = [], allowUn
   const topic = explicitTopic ?? (facets.length ? latestSymptom(history, currentCase.opening) : undefined)
     ?? (asksIllnessOnset ? symptomTopic(normalize(currentCase.opening)) : undefined);
   const target = configured.find(({ label }) => {
-    const key = normalize(label);
+    const key = questionText(label);
     return key === text || (facets.length === 1 && topic && facets[0][0].test(key) && topic[0].test(key));
   });
   const respond = (reply) => [social(question).prefix, reply].filter(Boolean).join(' ');
   if (target) return respond(target.reply);
-  if (associatedQuestion.test(text) || systemsQuestion.test(text)) {
+  if (associatedQuestion.test(text) || moreQuestion.test(text) || systemsQuestion.test(text)) {
     const known = new Set(symptomFacts.filter(([, fact]) => fact.test(normalize(currentCase.opening))
       || history.some((turn) => (turn.reply && fact.test(normalize(turn.reply))) || fact.test(normalize(turn.question)))));
     const candidate = symptomFacts.filter((item) => !known.has(item)).flatMap(([, fact]) => topicClauses(currentCase, fact))
@@ -352,18 +361,18 @@ export function focusedHistoryReply(currentCase, question, history = [], allowUn
 export function patientReplyFits(currentCase, question, reply, history = []) {
   const answer = normalize(reply);
   if (outOfRole.test(answer)) return false;
-  const text = normalize(question);
+  const text = questionText(question);
   if (openQuestion.test(text) || followUp.test(text)) return true;
   const topics = subjects.filter(([pattern]) => pattern.test(text));
   if (answer === normalize(currentCase.opening) && !topics.some(([, fact]) => fact.test(answer))) return false;
   const repeated = [...history].reverse().find((turn) => turn.reply && normalize(turn.reply) === answer);
   if (!repeated) return true;
-  const previous = normalize(repeated.question);
+  const previous = questionText(repeated.question);
   return previous === text || topics.some(([pattern, fact]) => pattern.test(previous) && fact.test(answer));
 }
 
 export function structured(currentCase, question, history = []) {
-  const background = patientBackgroundReply(currentCase, question);
+  const background = patientBackgroundReply(currentCase, question, history);
   if (background) return background;
   const socialTurn = social(question);
   if (socialTurn.only) return socialTurn.only;
@@ -371,17 +380,17 @@ export function structured(currentCase, question, history = []) {
   if (patientHistory) return patientHistory;
   const focused = focusedHistoryReply(currentCase, question, history);
   if (focused) return focused;
-  const text = normalize(question);
+  const text = questionText(question);
   const facts = interviewFacts(currentCase);
   let reply;
   if (followUp.test(text)) {
     // Social turns and earlier follow-ups can intervene between a topic and the next clinical question.
     for (const turn of [...history].reverse()) {
-      if (socialReply(turn.question) || followUp.test(normalize(turn.question))) continue;
-      if (openQuestion.test(normalize(turn.question))) {
+      if (socialReply(turn.question) || followUp.test(questionText(turn.question))) continue;
+      if (openQuestion.test(questionText(turn.question))) {
         reply = findFact(facts, text)?.reply || facts[0]?.reply;
       } else {
-        reply = findFact(facts, normalize(turn.question + ' ' + question))?.reply;
+        reply = findFact(facts, questionText(turn.question) + ' ' + text)?.reply;
       }
       break;
     }
