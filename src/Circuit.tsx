@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { Activity, Brain, ClipboardList, Clock3, FileText, HeartPulse, Mic, MicOff, Phone, PhoneOff, Send, Stethoscope, Volume2, VolumeX } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { Activity, Brain, CircleCheck, ClipboardList, Clock3, Droplets, Eye, FileText, HeartPulse, Mic, MicOff, Phone, PhoneOff, Send, Stethoscope, Volume2, VolumeX, Wind, type LucideIcon } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { collection, doc, getDocFromServer, getDocsFromServer, orderBy, query, where, limit } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
@@ -11,6 +11,7 @@ import { canListen, canSpeak, listenForQuestion, playSpeech, speak, useVoice } f
 import { createVoiceCall, type CallPhase, type CallState } from './voice-call';
 import { PHASES, SINGLE, STATION_MS, structured, type CaseData, type Grade, type Group, type Interaction } from '../shared/clinical.mjs';
 import { PATIENT_HISTORY_LIMIT } from '../shared/dialogue.mjs';
+import { EXAM_AREAS, examAreas, type ExamArea } from '../shared/exam.mjs';
 
 type Session = { id: string; index: number; complete: boolean; case: CaseData | null; titles: string[]; deadline: number | null; serverNow: number };
 type Turn = { question: string; reply: string; mode: 'structured'|'ai' };
@@ -22,6 +23,10 @@ const callLabels: Record<CallPhase, string> = {
 };
 const labels: Record<Group, string> = { anamnesis: 'Preguntas de anamnesis', exploracion: 'Exploración física',
   paraclinicos: 'Paraclínicos', razonamiento: 'Decisión diagnóstica', acciones: 'Conducta inicial', cierre: 'Comunicación y cierre' };
+const examIcons: Record<ExamArea, LucideIcon> = {
+  vitals: Activity, respiratory: Wind, cardiovascular: HeartPulse, abdomen: Droplets, neurological: Brain,
+  skin: Eye, other: Stethoscope,
+};
 
 function Station({ user, session, onSaved }: { user: User; session: Session; onSaved: (resultId: string) => void }) {
   const station = session.case!;
@@ -33,9 +38,13 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
   });
   const [phase, setPhase] = useState(0);
   const [tool, setTool] = useState<Group>('exploracion');
+  const [examArea, setExamArea] = useState<ExamArea | 'all'>('all');
+  const [latestFinding, setLatestFinding] = useState('');
+  const examOptions = useMemo(() => station.interactions.filter((item) => item.group === 'exploracion').map((item) => ({
+    ...item, areas: examAreas(item.label),
+  })), [station.interactions]);
   const [time, setTime] = useState(() => Math.max(0, deadline - session.serverNow));
   const [tab, setTab] = useState(false);
-  const [finding, setFinding] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
   const transcript = useRef<Turn[]>([]);
   const textRequest = useRef<AbortController | null>(null);
@@ -97,7 +106,11 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
     setSelected(next);
     try { sessionStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* Progress can still be submitted. */ }
     if (!item.reply) return;
-    if (item.group !== 'anamnesis') { setFinding(item.reply); return; }
+    if (item.group === 'exploracion' || item.group === 'paraclinicos') {
+      setLatestFinding(item.id);
+      return;
+    }
+    if (item.group !== 'anamnesis') return;
     addTurn({ question: item.label, reply: item.reply, mode: 'structured' });
     if (audio && !callActive && !voice.listening) speak(item.reply);
   }
@@ -150,9 +163,13 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
   const totalSeconds = Math.ceil(time / 1000);
   const clock = [Math.floor(totalSeconds / 60), totalSeconds % 60].map((value) => String(value).padStart(2, '0')).join(':');
   const centralGroup = phases[phase][0];
-  const toolOptions = station.interactions.filter((item) => item.group === tool);
-  const toolIcon = tool === 'paraclinicos' ? ClipboardList : tool === 'acciones' ? HeartPulse : Activity;
-  const ToolIcon = toolIcon;
+  const toolOptions = tool === 'exploracion'
+    ? examOptions.filter((item) => examArea === 'all' || item.areas.includes(examArea))
+    : station.interactions.filter((item) => item.group === tool).map((item) => ({ ...item, areas: [] }));
+  const availableAreas = (Object.keys(EXAM_AREAS) as ExamArea[]).filter((area) => examOptions.some((item) => item.areas.includes(area)));
+  const findings = selected.map((id) => station.interactions.find((item) => item.id === id))
+    .filter((item): item is Interaction => Boolean(item && (item.group === 'exploracion' || item.group === 'paraclinicos') && item.reply))
+    .reverse();
   return <main className="simulator">
     <nav className="phase-bar" aria-label="Fases de la estación">{PHASES.map((name, index) =>
       <button key={name} className={index === phase ? 'phase current' : 'phase'} aria-current={index === phase ? 'step' : undefined}
@@ -202,17 +219,38 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
           {tab && <div className="transcript-list">{!turns.length ? <span>Aún no has hecho preguntas.</span> : turns.map((turn, index) => <div key={index}><b>{turn.question}</b><p>{turn.reply}</p><small>{turn.mode === 'ai' ? 'IA generativa' : 'Respuesta estructurada'}</small></div>)}</div>}
         </div>
       </section>
-      <aside className="tools card"><h2><BriefIcon/> Herramientas clínicas</h2><div className="tabs">
+      <aside className="tools card" id="station-clinical-tools" tabIndex={-1}><h2><BriefIcon/> Herramientas clínicas</h2><div className="tabs">
         {(['exploracion', 'paraclinicos', 'acciones'] as const).map((key) =>
-          <button key={key} className={key === tool ? 'active' : ''} aria-pressed={key === tool} onClick={() => { setTool(key); setFinding(''); }}>
+          <button key={key} className={key === tool ? 'active' : ''} aria-pressed={key === tool} onClick={() => setTool(key)}>
             {key === 'acciones' ? 'Acciones' : labels[key]}</button>)}</div>
-        <div className="tool-buttons">{toolOptions.map((item) => <button key={item.id} aria-pressed={selected.includes(item.id)} disabled={saving || !time} onClick={() => choose(item)}><ToolIcon size={24}/>{item.label}</button>)}
-          {!toolOptions.length && <p>No hay opciones de esta categoría para el caso.</p>}</div>
-        <div className="findings"><h3><ClipboardList size={19}/> Hallazgos solicitados</h3><p aria-live="polite">{finding || 'Selecciona una herramienta para ver los hallazgos.'}</p></div>
+        {tool === 'exploracion' && availableAreas.length > 1 && <div className="exam-areas" role="group" aria-label="Sistemas del examen físico">
+          <button type="button" aria-pressed={examArea === 'all'} onClick={() => setExamArea('all')}>Todos</button>
+          {availableAreas.map((area) => <button type="button" key={area} aria-pressed={examArea === area}
+            onClick={() => setExamArea(area)}>{EXAM_AREAS[area]}</button>)}
+        </div>}
+        <div className="tool-buttons">{toolOptions.map((item) => {
+          const area = examArea === 'all' ? item.areas[0] : examArea;
+          const ToolIcon = tool === 'paraclinicos' ? ClipboardList : tool === 'acciones' ? HeartPulse : examIcons[area ?? 'other'];
+          const requested = selected.includes(item.id);
+          return <button key={item.id} aria-pressed={requested} disabled={saving || !time} onClick={() => choose(item)}>
+            <ToolIcon size={24} aria-hidden="true"/><span>{item.label}</span>
+            {requested && <small><CircleCheck size={14} aria-hidden="true"/>{tool === 'acciones' ? 'Seleccionada' : 'Solicitado'}</small>}
+          </button>;
+        })}
+          {!toolOptions.length && <p>Este caso no incluye {tool === 'exploracion' ? 'hallazgos de examen físico' : tool === 'paraclinicos' ? 'paraclínicos' : 'acciones'} en esta sección.</p>}</div>
+        <div className="findings"><h3><ClipboardList size={19}/> Hallazgos solicitados</h3>
+          <span className="sr-only" role="status">{latestFinding && findings.find((item) => item.id === latestFinding)?.reply}</span>
+          {findings.length ? <ul className="findings-list">{findings.map((item) => <li key={item.id} className={item.id === latestFinding ? 'latest' : ''}>
+            <small>{labels[item.group]}</small><strong>{item.label}</strong><p>{item.reply}</p>
+          </li>)}</ul> : <p>Solicita una exploración o un paraclínico para ver su resultado aquí.</p>}
+        </div>
       </aside>
     </div>
     <section className="card station-options"><h2><Brain size={21}/> {labels[centralGroup]}</h2><p>{phase === 0 ? station.scenario : 'Selecciona y registra tus decisiones durante la estación.'}</p>
-      {phase === 1 ? <p>Solicita los hallazgos en Herramientas clínicas.</p> :
+      {phase === 1 ? <button type="button" className="button secondary" onClick={() => {
+        setTool('exploracion');
+        document.getElementById('station-clinical-tools')?.focus();
+      }}>Ir a exploración física</button> :
         <div className="option-list">{station.interactions.filter((item) => item.group === centralGroup).map((item) =>
           <button key={item.id} className={'button secondary ' + (selected.includes(item.id) ? 'picked' : '')} aria-pressed={selected.includes(item.id)} disabled={saving || !time} onClick={() => choose(item)}>{item.label}</button>)}</div>}
     </section>

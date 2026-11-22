@@ -7,6 +7,7 @@ import { createHandler, DailyLimits } from '../worker/index.mjs';
 import { grade, readInvitations, structured, validAnswers, validCase } from '../shared/clinical.mjs';
 import { PATIENT_HISTORY_LIMIT, socialReply } from '../shared/dialogue.mjs';
 import { caseGroups } from '../shared/case-groups.mjs';
+import { examAreas } from '../shared/exam.mjs';
 import { readFile } from 'node:fs/promises';
 
 const bearer = { Authorization: 'Bearer a.b.c', 'Content-Type': 'application/json' };
@@ -24,6 +25,13 @@ test('el banco clasifica los casos previos y conserva los grupos elegidos en adm
   assert.deepEqual(await caseGroups('hiponatremia', []), []);
   assert.ok(validCase({ ...example[0].data, curricularGroups: ['A', 'B'] }, example[0].rubric));
   assert.equal(validCase({ ...example[0].data, curricularGroups: ['A', 'A'] }, example[0].rubric), false);
+});
+
+test('la exploración se puede localizar por todos los sistemas que indica su etiqueta', () => {
+  assert.deepEqual(examAreas('Saturación, tiraje y llenado capilar'), ['vitals', 'respiratory', 'cardiovascular']);
+  assert.deepEqual(examAreas('Examen neurológico y signos meníngeos'), ['neurological']);
+  assert.deepEqual(examAreas('Hidratación y exantema'), ['abdomen', 'skin']);
+  assert.deepEqual(examAreas('Otoscopia'), ['other']);
 });
 
 test('tres borradores válidos y evaluación con decisiones mutuamente excluyentes', () => {

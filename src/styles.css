@@ -145,12 +145,22 @@ textarea { resize: vertical; }
 .tabs { display: flex; gap: .28rem; flex-wrap: wrap; margin: .65rem 0 .85rem; }
 .tabs button { flex: 1 1 auto; min-height: 39px; background: #efecfd; color: #29225f; border: 1px solid #e5defa; border-radius: 9px; font-size: .82rem; padding: .35rem; }
 .tabs button.active { background: #5b45c5; color: white; }
+.exam-areas { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .65rem; }
+.exam-areas button { color: var(--deep); background: white; border: 1px solid var(--border); border-radius: 8px; padding: .35rem .52rem; font-size: .79rem; min-height: 34px; }
+.exam-areas button[aria-pressed='true'] { background: #e4d9ff; border-color: #997cee; font-weight: 650; }
 .tool-buttons { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px,1fr)); gap: .45rem; }
 .tool-buttons button { min-height: 88px; border: 1px solid var(--border); border-radius: 12px; color: #211948; background: #f0edfb; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .3rem; font-size: .8rem; padding: .45rem; }
 .tool-buttons button svg { color: var(--purple); }
 .tool-buttons button[aria-pressed='true'], .picked { border-color: #997cee; background: #e4d9ff; }
+.tool-buttons small { display: inline-flex; align-items: center; gap: .2rem; color: var(--deep); font-size: .73rem; }
 .findings { background: #f2f0fc; border: 1px solid var(--border); border-radius: 13px; margin-top: .8rem; padding: .75rem; }
 .findings p { margin-top: .45rem; font-size: .91rem; }
+.findings-list { list-style: none; display: grid; gap: .45rem; margin: .55rem 0 0; padding: 0; }
+.findings-list li { background: #fff; border: 1px solid var(--border); border-radius: 9px; padding: .5rem .6rem; }
+.findings-list li.latest { border-color: #997cee; }
+.findings-list small, .findings-list strong { display: block; }
+.findings-list small { color: var(--deep); font-size: .72rem; margin-bottom: .15rem; }
+.findings-list p { margin: .25rem 0 0; }
 .option-list, .admin-tabs, .action-row { display: flex; flex-wrap: wrap; gap: .45rem; }
 .case-filters { margin-bottom: .85rem; }
 .station-footer { padding: .55rem .7rem; background: #eeebfc; border: 1px solid var(--border); border-radius: 14px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .55rem; }
