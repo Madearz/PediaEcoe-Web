@@ -8,7 +8,10 @@ const ignored = new Set(['acerca', 'algun', 'alguna', 'antes', 'algo', 'como', '
   'manera', 'nino', 'nina', 'puede', 'podria', 'pregunta', 'sobre', 'tiene', 'usted', 'doctor', 'doctora']);
 const timingQuestion = /\b(desde cuando|hace cuanto|cuando (empezo|comenzo|inicio)|desde que (dia|hora)|hace cuantos dias|inicio|duracion)\b/;
 const timingFact = /\b(inicio|evolucion|duracion|primero|horas|dias|semanas|ayer|empezo|comenzo)\b/;
-const medicationQuestion = /\b(medicamentos?|medicina|jarabe|tratamiento|remedio)\b/;
+const medicationQuestion = /\b(medicamentos?|medicacion|medicinas?|farmacos?|jarabes?|tratamientos?|remedios?|pastillas?|antibioticos?|inhaladores?|insulina|diureticos?|descongestionantes?|hierro|paracetamol|acetaminofen|ibuprofeno|antihistaminicos?)\b/;
+const specificMedication = /\b(antibioticos?|inhaladores?|insulina|diureticos?|descongestionantes?|hierro|paracetamol|acetaminofen|ibuprofeno|antihistaminicos?)\b/;
+const vaccineQuestion = /\b(vacunas?|vacunad[oa]s?|vacunacion|inmunizacion|esquema vacunal|esquema de vacunas|carn[et]+ de vacunas)\b/;
+const vaccineFact = /\b(vacun\w*|inmuniz\w*|esquema|carne|carnet|dosis de refuerzo|registro(?: completo| de vacunacion))\b/;
 const allergyQuestion = /\b(alergia|alergico|alergica|alergias)\b/;
 const backgroundQuestion = /\b(?:(?:sufre|padece) de algo(?: mas)?|(?:sufre|padece|tiene|ha tenido|le han diagnosticado) (?:de )?alguna enfermedad(?: de base| cronica| previa)?|(?:algun |alguna )antecedentes?(?: (?:personal|medico|patologico)s?)?)(?: doctor| doctora| senor| senora)?$/;
 const backgroundFact = /\b(?:antecedentes? (?:personales?|medicos?|patologicos?|renales?|cardiacos?|respiratorios?)|comorbilidades?|enfermedades? (?:cronicas?|previas?|de base))\b/;
@@ -20,9 +23,9 @@ const subjects = [
   [/\b(orina|orinar|pip[ií]|panales?|miccion)\b/, /orin|diuresis|panal|panales|miccion/],
   [/\b(vomito|vomita|vomitar|emesis)\b/, /vomit|emesis/],
   [/\b(diarrea|deposiciones?|evacua|popo|heces)\b/, /diarrea|deposicion|evacu|heces/],
-  [medicationQuestion, /medicamento|tratamiento|farmaco|jarabe|remedio/],
+  [medicationQuestion, medicationQuestion],
   [allergyQuestion, /alerg/],
-  [/\b(vacuna|vacunas|vacunado|vacunada|vacunacion)\b/, /vacun|inmuniza/],
+  [vaccineQuestion, vaccineFact],
   [/\b(dolor|duele|doloroso)\b/, /dolor|duele/],
   [/\b(apnea|pausa|pausas)\b/, /apnea|pausa/],
 ];
@@ -63,6 +66,7 @@ function social(question) {
   const asksName = /\b(?:como se llama usted|como te llamas|cual es (?:su|tu) nombre|con quien (?:hablo|tengo el gusto)|quien (?:es usted|eres)|que parentesco)\b/.test(text);
   const checksIn = /\bcomo est(?:a|as)(?: usted)?$/.test(text);
   const clinical = questionSignal.test(text) || openQuestion.test(text) || backgroundQuestion.test(text)
+    || vaccineQuestion.test(text) || medicationQuestion.test(text)
     || (question.includes('?') && !permission && !asksName && !checksIn);
   if (asksName && !clinical) {
     return { only: 'Soy la persona que acompaña al paciente. Puede hablar conmigo.', prefix: '' };
@@ -97,11 +101,84 @@ export function patientBackgroundReply(currentCase, question) {
   return [social(question).prefix, reply].filter(Boolean).join(' ');
 }
 
+const beforeChoice = /^(?:y |los |lo |de |las |del |los de |lo de |las de |que le dieron |que tomaba )*(?:antes|previos?|previamente|habituales)(?: de venir| de la consulta| de que empezara| por favor)?$/;
+const currentChoice = /^(?:y |los |lo |de |las |del |los de |lo de |las de )*(?:ahora|hoy|actualmente|actuales)(?: por favor)?$/;
+const previousMedication = /\b(antes|previo\w*|previamente|habitual\w*|desde hace|hace (?:pocos |varios |unos |\d+ )?(?:dias|semanas)|recibio|habia recibido|inici[oó]|uso|tomaba|dieron|extraccion)\b/;
+const currentMedication = /\b(hoy|ahora|actualmente|esta (?:tomando|recibiendo|usando)|toma|usa|recibe|administra)\b/;
+
+function topicClauses(currentCase, source, linkedSource = source) {
+  return [{ label: '', reply: currentCase.opening }, ...currentCase.interactions.filter((item) => item.group === 'anamnesis')]
+    .flatMap(({ label, reply }) => (reply ?? '').split(/;\s*|(?<=[.!?])\s+|,\s+|\s+y\s+/)
+      .map((part) => part.trim()).filter((part) => {
+        const value = normalize(part);
+        return source.test(value) || (source.test(normalize(label)) && linkedSource.test(value));
+      }));
+}
+
+function asSentence(text) {
+  const phrase = text.trim().replace(/[;,]+$/, '');
+  return phrase.charAt(0).toUpperCase() + phrase.slice(1) + (/[.!?]$/.test(phrase) ? '' : '.');
+}
+
+function recentMedicationTopic(history) {
+  for (const turn of [...history].reverse()) {
+    const text = normalize(turn.question);
+    if (allergyQuestion.test(text) || vaccineQuestion.test(text)) return '';
+    if (medicationQuestion.test(text)) return text;
+    if (!socialReply(turn.question) && !beforeChoice.test(text) && !currentChoice.test(text) && !followUp.test(text)) return '';
+  }
+  return '';
+}
+
+export function patientHistoryReply(currentCase, question, history = []) {
+  const text = normalize(question);
+  if (allergyQuestion.test(text)) return null;
+  if (vaccineQuestion.test(text)) {
+    const evidence = topicClauses(currentCase, /\b(vacun\w*|inmuniz\w*)\b/, vaccineFact);
+    const vaccine = text.match(/\b(?:contra|de la vacuna de) (?:el |la )?([a-z0-9]+)/)?.[1];
+    const relevant = evidence.find((source) => !vaccine || normalize(source).includes(vaccine));
+    const relevantText = normalize(relevant ?? '');
+    let reply = relevant ? asSentence(relevant) : vaccine
+      ? 'No recuerdo si recibió esa vacuna en particular. Tendría que revisar el carné.'
+      : 'No estoy seguro de si tiene todas las vacunas al día. Tendría que revisar el carné.';
+    if (!vaccine && /^(?:vacunacion|esquema) incomplet[oa]$/.test(relevantText)) reply = 'Le faltan algunas vacunas.';
+    if (!vaccine && /^(?:vacunacion|esquema) al dia$/.test(relevantText)) reply = 'Sí, tiene las vacunas al día.';
+    return [social(question).prefix, reply].filter(Boolean).join(' ');
+  }
+
+  const topic = medicationQuestion.test(text) ? text
+    : beforeChoice.test(text) || currentChoice.test(text) ? recentMedicationTopic(history) : '';
+  if (!topic) return null;
+  const medication = topic.match(specificMedication)?.[0]?.replace(/(?:res|s)$/, (suffix) => suffix === 'res' ? 'r' : '');
+  const prior = priorMedicationQuestion(text);
+  const recent = currentChoice.test(text) || /\b(ahora|hoy|actualmente|para esto|este episodio)\b/.test(text);
+  const snippets = topicClauses(currentCase, medicationQuestion);
+  const eligible = snippets.filter((item) => {
+    const fact = normalize(item);
+    if (medication && !fact.includes(medication)) return false;
+    if (prior) return previousMedication.test(fact) || !currentMedication.test(fact);
+    if (recent) return currentMedication.test(fact) && !/\bantes de (?:este|esta|que|venir)\b/.test(fact);
+    return true;
+  });
+  const reply = eligible.length ? eligible.slice(0, 2).map(asSentence).join(' ')
+    : medication ? 'No recuerdo si tomó ese medicamento.'
+      : prior ? 'No recuerdo si le dieron algún medicamento antes de venir.'
+        : recent ? 'No sé si recibió algún medicamento para este episodio.'
+          : '¿Me pregunta por lo que tomaba antes o por lo que le dieron hoy?';
+  return [social(question).prefix, reply].filter(Boolean).join(' ');
+}
+
+function priorMedicationQuestion(text) {
+  return beforeChoice.test(text) || /\b(antes|previamente|previos?|habitualmente|habituales)\b/.test(text);
+}
+
 export function structured(currentCase, question, history = []) {
   const background = patientBackgroundReply(currentCase, question);
   if (background) return background;
   const socialTurn = social(question);
   if (socialTurn.only) return socialTurn.only;
+  const patientHistory = patientHistoryReply(currentCase, question, history);
+  if (patientHistory) return patientHistory;
   const text = normalize(question);
   const facts = currentCase.interactions.filter((item) => item.group === 'anamnesis' && item.reply);
   let reply;
@@ -122,7 +199,6 @@ export function structured(currentCase, question, history = []) {
   if (!reply && age) reply = `Tiene ${age}.`;
   reply ||= findFact(facts, text)?.reply;
   if (!reply && allergyQuestion.test(text)) reply = 'No sabría confirmarle si tiene alguna alergia. ¿Se refiere a algún medicamento o alimento en particular?';
-  if (!reply && medicationQuestion.test(text)) reply = 'No recuerdo ese detalle con seguridad. ¿Me pregunta por algo que le dieron antes o por lo que recibió hoy?';
-  reply ||= '¿Me lo puede preguntar de otra manera? Puedo contarle cómo empezó y qué cambios he notado.';
+  reply ||= 'No recuerdo bien ese detalle.';
   return [socialTurn.prefix, reply].filter(Boolean).join(' ');
 }

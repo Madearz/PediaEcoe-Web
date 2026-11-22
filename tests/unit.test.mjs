@@ -244,6 +244,37 @@ test('el familiar reconoce la presentación y responde con los datos del caso cu
   assert.equal(structured(knownBackground, '¿Tiene algún antecedente familiar?'), 'Su madre también tiene asma.');
 });
 
+test('las vacunas y el seguimiento «antes» se mantienen en el tema solicitado', () => {
+  const base = { opening: 'Le salió un exantema en la cabeza.', interactions: [
+    { group: 'anamnesis', label: 'Vacunas y secuencia del exantema', reply: 'El exantema empezó en la cara.' },
+    { group: 'anamnesis', label: 'Síntomas y medicamentos', reply: 'Se queja de picor.' },
+  ] };
+  assert.equal(structured(base, '¿Tiene las vacunas al día?'),
+    'No estoy seguro de si tiene todas las vacunas al día. Tendría que revisar el carné.');
+  const incomplete = { ...base, interactions: [
+    { group: 'anamnesis', label: 'Vacunación, contactos y secuencia del exantema', reply: 'Vacunación incompleta y contacto reciente; empezó en cara.' },
+  ] };
+  assert.equal(structured(incomplete, '¿Tiene las vacunas al día?'), 'Le faltan algunas vacunas.');
+  assert.equal(structured(incomplete, 'Hola tiene las vacunas al día'), 'Hola, gracias por atendernos. Le faltan algunas vacunas.');
+  assert.match(structured(incomplete, '¿Tiene la vacuna contra el sarampión?'), /esa vacuna en particular/);
+  const completed = { ...base, interactions: [
+    { group: 'anamnesis', label: 'Vacunas', reply: 'Vacunación al día, tolerancia oral conservada.' },
+  ] };
+  assert.equal(structured(completed, '¿Tiene las vacunas al día?'), 'Sí, tiene las vacunas al día.');
+  const question = '¿Tomaba medicamentos?';
+  const reply = structured(base, question);
+  const history = [{ question, reply }];
+  assert.match(reply, /antes/);
+  assert.equal(structured(base, 'Antes', history), 'No recuerdo si le dieron algún medicamento antes de venir.');
+  assert.equal(structured(base, 'Y los de ahora', [...history, { question: 'Antes', reply: 'No recuerdo.' }]),
+    'No sé si recibió algún medicamento para este episodio.');
+  const medicine = { ...base, interactions: [
+    { group: 'anamnesis', label: 'Tratamiento previo', reply: 'Inició diurético hace pocos días, sin convulsiones ni desorientación.' },
+  ] };
+  assert.equal(structured(medicine, 'Los de antes', history), 'Inició diurético hace pocos días.');
+  assert.equal(structured(medicine, '¿Tomó ibuprofeno?'), 'No recuerdo si tomó ese medicamento.');
+});
+
 test('Worker bloquea IA para cuenta anónima, sin invitación, revocada o circuito ajeno', async () => {
   let invitation = 'missing';
   let uid = 'other';
@@ -272,6 +303,13 @@ test('Worker bloquea IA para cuenta anónima, sin invitación, revocada o circui
   uid = 'student';
   assert.deepEqual(await (await app(call(path, introduction), env)).json(),
     { mode: 'structured', reply: 'Mucho gusto. Sí, claro. Puede preguntarme.' });
+  const vaccination = { question: '¿Tiene las vacunas al día?' };
+  assert.match((await (await app(call(path, vaccination), env)).json()).reply, /revisar el carné/);
+  const medication = { question: '¿Toma medicamentos?' };
+  const firstMedication = await (await app(call(path, medication), env)).json();
+  const priorMedication = { question: 'Antes', history: [{ ...medication, reply: firstMedication.reply }] };
+  assert.equal((await (await app(call(path, priorMedication), env)).json()).reply,
+    'No recuerdo si le dieron algún medicamento antes de venir.');
   assert.deepEqual(await (await app(call(path, { question: '¿Sufre de algo?' }), env)).json(),
     { mode: 'structured', reply: 'No que yo sepa. ¿Se refiere a alguna enfermedad en particular?' });
   assert.equal(providerCalls, 0);

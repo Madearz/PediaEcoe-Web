@@ -1,6 +1,6 @@
 import { ApiError, firestore, verifyGoogleToken } from './firebase.mjs';
 import { DAILY_CIRCUITS_DEFAULT, DAILY_CIRCUITS_MAX, grade, normalizeEmail, STATION_MS, structured, validAnswers, validCase, validId } from '../shared/clinical.mjs';
-import { PATIENT_HISTORY_LIMIT, patientAge, patientBackgroundReply, socialReply } from '../shared/dialogue.mjs';
+import { PATIENT_HISTORY_LIMIT, patientAge, patientBackgroundReply, patientHistoryReply, socialReply } from '../shared/dialogue.mjs';
 import { reviewFacts, reviewReply } from '../shared/review.mjs';
 import { FOLLOW_UP, JUSTIFICATION_LIMIT } from '../shared/learning.mjs';
 import { addDiagnosticChoices, evolutions } from './evolutions.mjs';
@@ -302,7 +302,8 @@ async function modelAnswer(db, env, caller, messages, maxTokens) {
 }
 
 async function dialogue(db, env, caller, currentCase, question, history) {
-  const immediate = socialReply(question) ?? patientBackgroundReply(currentCase, question);
+  const immediate = socialReply(question) ?? patientBackgroundReply(currentCase, question)
+    ?? patientHistoryReply(currentCase, question, history);
   if (immediate) return { mode: 'structured', reply: immediate };
 
   const facts = currentCase.interactions.filter((item) => item.group === 'anamnesis').map(({ label, reply }) => ({ label, reply }));
@@ -321,7 +322,7 @@ async function dialogue(db, env, caller, currentCase, question, history) {
   }
   messages.push({ role: 'user', content: question });
   const answer = await modelAnswer(db, env, caller, messages, 110);
-  if (answer && !/\bno (?:tengo|cuento con|dispongo de) (?:ese|el|este) dato\b/i.test(answer.reply)) {
+  if (answer && !/\b(?:no (?:tengo|cuento con|dispongo de) (?:ese|el|este) dato|preguntarme de otra (?:forma|manera))\b/i.test(answer.reply)) {
     return { ...answer, reply: answer.reply.slice(0, 750) };
   }
   return { mode: 'structured', reply: structured(currentCase, question, history) };
