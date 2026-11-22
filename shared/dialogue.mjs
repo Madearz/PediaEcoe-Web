@@ -12,6 +12,8 @@ const medicationQuestion = /\b(medicamentos?|medicacion|medicinas?|farmacos?|jar
 const specificMedication = /\b(antibioticos?|inhaladores?|insulina|diureticos?|descongestionantes?|hierro|paracetamol|acetaminofen|ibuprofeno|antihistaminicos?)\b/;
 const vaccineQuestion = /\b(vacunas?|vacunad[oa]s?|vacunacion|inmunizacion|esquema vacunal|esquema de vacunas|carn[et]+ de vacunas)\b/;
 const vaccineFact = /\b(vacun\w*|inmuniz\w*|esquema|carne|carnet|dosis de refuerzo|registro(?: completo| de vacunacion))\b/;
+const insuranceQuestion = /\b(eps|e p s|entidad promotora de salud|aseguradora|seguro (?:medico|de salud)|afiliaci[oó]n (?:a|en) salud|afiliad[oa]s? (?:a|al|en)|regimen (?:contributivo|subsidiado))\b/;
+const insuranceFact = /\b(eps|e p s|entidad promotora de salud|aseguradora|seguro (?:medico|de salud)|afiliaci[oó]n|afiliad[oa]s?|regimen (?:contributivo|subsidiado))\b/;
 const allergyQuestion = /\b(alergia|alergico|alergica|alergias)\b/;
 const backgroundQuestion = /\b(?:(?:sufre|padece) de algo(?: mas)?|(?:sufre|padece|tiene|ha tenido|le han diagnosticado) (?:de )?alguna enfermedad(?: de base| cronica| previa)?|(?:algun |alguna )antecedentes?(?: (?:personal|medico|patologico)s?)?)(?: doctor| doctora| senor| senora)?$/;
 const backgroundFact = /\b(?:antecedentes? (?:personales?|medicos?|patologicos?|renales?|cardiacos?|respiratorios?)|comorbilidades?|enfermedades? (?:cronicas?|previas?|de base))\b/;
@@ -26,6 +28,8 @@ const subjects = [
   [medicationQuestion, medicationQuestion],
   [allergyQuestion, /alerg/],
   [vaccineQuestion, vaccineFact],
+  [insuranceQuestion, insuranceFact],
+  [/\b(exantema|sarpullido|ronchas?|lesiones?|manchas?|erupcion|granitos?)\b/, /\b(exantema|sarpullido|ronchas?|lesiones?|manchas?|erupcion|granitos?)\b/],
   [/\b(dolor|duele|doloroso)\b/, /dolor|duele/],
   [/\b(apnea|pausa|pausas)\b/, /apnea|pausa/],
 ];
@@ -33,6 +37,7 @@ const questionSignal = /\b(que (le |lo |la )?(paso|ocurrio|preocupa|trajo|trae|n
 const openQuestion = /\b(que (?:(?:le|lo|la|les|los|las|te) )?(?:trae|trajo|paso|ocurrio|preocupa)|por que (?:vino|vinieron|viene|vienen|consulto|consultan|(?:lo |la )?(?:trajo|trajeron))|por que motivo|motivo (?:de (?:la )?|por el que )(?:consulta|visita|vino)|razon de (?:la )?(?:consulta|visita)|como (?:empezo|comenzo) todo|cuenteme que paso|que (?:le )?pasa|en que (?:le |te )?puedo (?:ayudarle|ayudar))\b/;
 const followUp = /^(?:y )?(?:desde cuando|cuando fue|hace cuanto|cuanto tiempo|luego|despues|que paso despues|que mas|algo mas|me cuenta mas|podria contarme mas|eso|como asi)(?: paso| exactamente)?$/;
 const ageQuestion = /\b(que edad tiene|cuantos (?:anos|meses) tiene|cual es (?:la|su) edad)\b/;
+const outOfRole = /\b(?:no (?:tengo|cuento con|dispongo de) (?:ese|el|este) dato|pregunt\w* de otra (?:forma|manera)|reformul\w* (?:la|su|tu) pregunta|(?:no se (?:han )?)?(?:detect\w*|identific\w*|observ\w*) (?:de )?(?:comportamientos? inadecuados?|contenido (?:inadecuado|inapropiado|ofensivo)))\b/;
 
 function findFact(items, text) {
   const words = [...new Set(text.match(/[a-z]{4,}/g) ?? [])].filter((word) => !ignored.has(word));
@@ -66,7 +71,7 @@ function social(question) {
   const asksName = /\b(?:como se llama usted|como te llamas|cual es (?:su|tu) nombre|con quien (?:hablo|tengo el gusto)|quien (?:es usted|eres)|que parentesco)\b/.test(text);
   const checksIn = /\bcomo est(?:a|as)(?: usted)?$/.test(text);
   const clinical = questionSignal.test(text) || openQuestion.test(text) || backgroundQuestion.test(text)
-    || vaccineQuestion.test(text) || medicationQuestion.test(text)
+    || vaccineQuestion.test(text) || medicationQuestion.test(text) || insuranceQuestion.test(text)
     || (question.includes('?') && !permission && !asksName && !checksIn);
   if (asksName && !clinical) {
     return { only: 'Soy la persona que acompaña al paciente. Puede hablar conmigo.', prefix: '' };
@@ -123,7 +128,7 @@ function asSentence(text) {
 function recentMedicationTopic(history) {
   for (const turn of [...history].reverse()) {
     const text = normalize(turn.question);
-    if (allergyQuestion.test(text) || vaccineQuestion.test(text)) return '';
+    if (allergyQuestion.test(text) || vaccineQuestion.test(text) || insuranceQuestion.test(text)) return '';
     if (medicationQuestion.test(text)) return text;
     if (!socialReply(turn.question) && !beforeChoice.test(text) && !currentChoice.test(text) && !followUp.test(text)) return '';
   }
@@ -143,6 +148,14 @@ export function patientHistoryReply(currentCase, question, history = []) {
       : 'No estoy seguro de si tiene todas las vacunas al día. Tendría que revisar el carné.';
     if (!vaccine && /^(?:vacunacion|esquema) incomplet[oa]$/.test(relevantText)) reply = 'Le faltan algunas vacunas.';
     if (!vaccine && /^(?:vacunacion|esquema) al dia$/.test(relevantText)) reply = 'Sí, tiene las vacunas al día.';
+    return [social(question).prefix, reply].filter(Boolean).join(' ');
+  }
+  if (insuranceQuestion.test(text)) {
+    const evidence = topicClauses(currentCase, insuranceFact);
+    const named = currentCase.interactions.find(({ group, label, reply }) => group === 'anamnesis' && reply
+      && /^(?:nombre (?:de |de la )?)?(?:eps|e p s|aseguradora)$/.test(normalize(label)));
+    const reply = evidence.length ? asSentence(evidence[0])
+      : named ? asSentence(named.reply) : 'Tendría que revisar los documentos para confirmarle lo de la EPS.';
     return [social(question).prefix, reply].filter(Boolean).join(' ');
   }
 
@@ -172,6 +185,19 @@ function priorMedicationQuestion(text) {
   return beforeChoice.test(text) || /\b(antes|previamente|previos?|habitualmente|habituales)\b/.test(text);
 }
 
+export function patientReplyFits(currentCase, question, reply, history = []) {
+  const answer = normalize(reply);
+  if (outOfRole.test(answer)) return false;
+  const text = normalize(question);
+  if (openQuestion.test(text) || followUp.test(text)) return true;
+  const topics = subjects.filter(([pattern]) => pattern.test(text));
+  if (answer === normalize(currentCase.opening) && !topics.some(([, fact]) => fact.test(answer))) return false;
+  const repeated = [...history].reverse().find((turn) => turn.reply && normalize(turn.reply) === answer);
+  if (!repeated) return true;
+  const previous = normalize(repeated.question);
+  return previous === text || topics.some(([pattern, fact]) => pattern.test(previous) && fact.test(answer));
+}
+
 export function structured(currentCase, question, history = []) {
   const background = patientBackgroundReply(currentCase, question);
   if (background) return background;
@@ -198,6 +224,7 @@ export function structured(currentCase, question, history = []) {
   const age = ageQuestion.test(text) ? patientAge(currentCase) : undefined;
   if (!reply && age) reply = `Tiene ${age}.`;
   reply ||= findFact(facts, text)?.reply;
+  if (reply && !patientReplyFits(currentCase, question, reply, history)) reply = undefined;
   if (!reply && allergyQuestion.test(text)) reply = 'No sabría confirmarle si tiene alguna alergia. ¿Se refiere a algún medicamento o alimento en particular?';
   reply ||= 'No recuerdo bien ese detalle.';
   return [socialTurn.prefix, reply].filter(Boolean).join(' ');

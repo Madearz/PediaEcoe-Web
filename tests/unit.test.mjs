@@ -312,6 +312,10 @@ test('Worker bloquea IA para cuenta anónima, sin invitación, revocada o circui
     'No recuerdo si le dieron algún medicamento antes de venir.');
   assert.deepEqual(await (await app(call(path, { question: '¿Sufre de algo?' }), env)).json(),
     { mode: 'structured', reply: 'No que yo sepa. ¿Se refiere a alguna enfermedad en particular?' });
+  for (const question of ['EPS', '¿A qué E.P.S. está afiliado?', '¿Tiene seguro médico?']) {
+    assert.deepEqual(await (await app(call(path, { question }), env)).json(),
+      { mode: 'structured', reply: 'Tendría que revisar los documentos para confirmarle lo de la EPS.' });
+  }
   assert.equal(providerCalls, 0);
   assert.equal((await (await app(call(path, { question: '¿Desde cuándo?' }), env)).json()).mode, 'ai');
   invitation = 'suspended';
@@ -324,6 +328,35 @@ test('Worker bloquea IA para cuenta anónima, sin invitación, revocada o circui
   const question = { question: '¿Qué le trae hoy?' };
   assert.deepEqual(await (await app(call(path, question), generic)).json(),
     { mode: 'structured', reply: example[0].data.opening });
+});
+
+test('la entrevista conserva el personaje y descarta respuestas repetidas al cambiar de tema', async () => {
+  const data = { ...example[0].data, opening: 'Le salió un exantema en la cabeza.', interactions: [
+    { group: 'anamnesis', label: 'Erupción', reply: 'Primero le salieron manchas en la cara.' },
+    { group: 'anamnesis', label: 'Tos', reply: 'Empezó a toser ayer.' },
+    { group: 'anamnesis', label: 'Vacunas', reply: 'Vacunación incompleta.' },
+    { group: 'anamnesis', label: 'Afiliación', reply: 'Estamos en el régimen subsidiado, tiene un exantema.' },
+  ] };
+  const history = [{ question: '¿Dónde tiene el sarpullido?', reply: data.interactions[0].reply }];
+  assert.equal(structured(data, 'Hola, ¿qué EPS tiene?', history),
+    'Hola, gracias por atendernos. Estamos en el régimen subsidiado.');
+  const db = { async get(path) {
+    if (path.startsWith('authorized_emails/')) return { data: { active: true } };
+    if (path.startsWith('simulation_sessions/')) return { data: { uid: 'student', index: 0, deadline: Date.now() + 10000 } };
+    return { data: { cases: [{ public: data }] } };
+  } };
+  const app = createHandler({ verify: async () => ({ uid: 'student', email: 'student@example.com' }), database: () => db });
+  let response;
+  const env = { AI_ENABLED: 'true', AI: { run: async () => ({ response }) },
+    LIMITS: { getByName: () => ({ fetch: async () => new Response(null, { status: 204 }) }) } };
+  const ask = async (question) => (await app(call('/circuits/circuit-id/dialogue', { question, history }), env)).json();
+  for (response of ['No se detectaron comportamientos inadecuados.', 'Puede reformular su pregunta.', data.opening, history[0].reply]) {
+    assert.deepEqual(await ask('¿Tiene tos?'), { mode: 'structured', reply: 'Empezó a toser ayer.' });
+  }
+  assert.deepEqual(await ask('¿Tiene las vacunas al día?'), { mode: 'structured', reply: 'Le faltan algunas vacunas.' });
+  assert.deepEqual(await ask('¿Dónde empezó la erupción?'), { mode: 'ai', reply: history[0].reply });
+  response = 'En casa ha estado más irritable.';
+  assert.deepEqual(await ask('¿Cómo se ha comportado en casa?'), { mode: 'ai', reply: response });
 });
 
 test('Worker rechaza puntajes del navegador, calcula y guarda con precondiciones', async () => {
