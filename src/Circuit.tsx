@@ -11,10 +11,13 @@ import { canListen, canSpeak, listenForQuestion, playSpeech, speak, useVoice } f
 import { createVoiceCall, type CallPhase, type CallState } from './voice-call';
 import { PHASES, SINGLE, STATION_MS, structured, type CaseData, type Grade, type Group, type Interaction } from '../shared/clinical.mjs';
 import { PATIENT_HISTORY_LIMIT } from '../shared/dialogue.mjs';
-import { EXAM_AREAS, examAreas, type ExamArea } from '../shared/exam.mjs';
+import { EXAM_AREAS, examAreas, requestedExam, type ExamArea } from '../shared/exam.mjs';
+import { requestedStudies, type StudyFinding } from '../shared/studies.mjs';
 
 type Session = { id: string; index: number; complete: boolean; case: CaseData | null; titles: string[]; deadline: number | null; serverNow: number };
-type Turn = { question: string; reply: string; mode: 'structured'|'ai' };
+type Turn = { question: string; reply: string; mode: 'structured'|'ai'; clinical?: boolean };
+type SupplementalFinding = StudyFinding & { group: 'exploracion'|'paraclinicos' };
+const turnLabel = (turn: Turn) => turn.clinical ? 'Resultado de la estación' : turn.mode === 'ai' ? 'IA generativa' : 'Respuesta estructurada';
 type Existing = { id: string; index: number; complete: boolean };
 const phases: Group[][] = [['anamnesis'], ['exploracion', 'paraclinicos'], ['razonamiento'], ['acciones'], ['cierre']];
 const callLabels: Record<CallPhase, string> = {
@@ -36,10 +39,12 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
     try { const saved = JSON.parse(sessionStorage.getItem(storageKey) ?? '[]'); return Array.isArray(saved) ? saved.filter((id) => station.interactions.some((item) => item.id === id)) : []; }
     catch { return []; }
   });
+  const selectedRef = useRef(selected);
   const [phase, setPhase] = useState(0);
   const [tool, setTool] = useState<Group>('exploracion');
   const [examArea, setExamArea] = useState<ExamArea | 'all'>('all');
   const [latestFinding, setLatestFinding] = useState('');
+  const [supplemental, setSupplemental] = useState<SupplementalFinding[]>([]);
   const examOptions = useMemo(() => station.interactions.filter((item) => item.group === 'exploracion').map((item) => ({
     ...item, areas: examAreas(item.label),
   })), [station.interactions]);
@@ -83,12 +88,12 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
     setSaving(true);
     setError('');
     try {
-      const { resultId } = await call<{ resultId: string }>(user, '/circuits/' + session.id + '/submit', { index: session.index, selections: selected });
+      const { resultId } = await call<{ resultId: string }>(user, '/circuits/' + session.id + '/submit', { index: session.index, selections: selectedRef.current });
       try { sessionStorage.removeItem(storageKey); } catch { /* Storage may be disabled. */ }
       onSaved(resultId);
     } catch (failure) { setError(messageOf(failure)); }
     finally { submitting.current = false; setSaving(false); }
-  }, [onSaved, selected, session.id, session.index, stopDictation, storageKey, user, voiceCall]);
+  }, [onSaved, session.id, session.index, stopDictation, storageKey, user, voiceCall]);
   useEffect(() => {
     const baseline = performance.now();
     const tick = () => setTime(Math.max(0, deadline - session.serverNow - (performance.now() - baseline)));
@@ -99,12 +104,16 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
   useEffect(() => {
     if (time <= 0 && !expired.current) { expired.current = true; void submit(); }
   }, [time, submit]);
-  function choose(item: Interaction) {
-    if (time <= 0 || saving) return;
-    const previous = SINGLE.includes(item.group) ? selected.filter((id) => station.interactions.find((option) => option.id === id)?.group !== item.group) : selected;
-    const next = [...new Set([...previous, item.id])];
+  function recordSelections(ids: string[], replaceGroup?: Group) {
+    const previous = replaceGroup ? selectedRef.current.filter((id) => station.interactions.find((option) => option.id === id)?.group !== replaceGroup) : selectedRef.current;
+    const next = [...new Set([...previous, ...ids])];
+    selectedRef.current = next;
     setSelected(next);
     try { sessionStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* Progress can still be submitted. */ }
+  }
+  function choose(item: Interaction) {
+    if (time <= 0 || submitting.current) return;
+    recordSelections([item.id], SINGLE.includes(item.group) ? item.group : undefined);
     if (!item.reply) return;
     if (item.group === 'exploracion' || item.group === 'paraclinicos') {
       setLatestFinding(item.id);
@@ -119,7 +128,32 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
     setTurns(transcript.current);
   }
   async function requestAnswer(question: string, signal: AbortSignal) {
-    const history = transcript.current.slice(-PATIENT_HISTORY_LIMIT).map((turn) => ({
+    signal.throwIfAborted();
+    const studies = requestedStudies(station, question);
+    const exam = requestedExam(station.interactions, question);
+    if (studies || exam) {
+      if (time <= 0 || submitting.current) throw new Error('La estación ya terminó.');
+      const documented = [...(exam ?? []), ...(studies?.documented ?? [])];
+      const extra: SupplementalFinding[] = (studies?.supplemental ?? []).map((item) => ({
+        ...item, id: 'study:' + item.id, group: 'paraclinicos',
+      }));
+      if (exam && !exam.length && !studies) {
+        extra.push({ id: 'exam:unavailable', group: 'exploracion', label: 'Exploración solicitada',
+          reply: 'No hay un hallazgo registrado para esa solicitud. Puedes pedir otra exploración disponible en el caso.', kind: 'unavailable' });
+      }
+      if (documented.length) recordSelections(documented.map((item) => item.id));
+      if (extra.length) setSupplemental((current) => [...extra, ...current.filter((item) => !extra.some(({ id }) => id === item.id))]);
+      setLatestFinding(extra.at(-1)?.id ?? documented.at(-1)?.id ?? '');
+      setTool(studies ? 'paraclinicos' : 'exploracion');
+      setExamArea('all');
+      const reply = [
+        ...documented.map((item) => `${item.label}. ${item.reply}`),
+        ...extra.map((item) => `${item.label}. ${item.kind === 'simulated' ? 'Normal simulado. ' : ''}${item.reply}`),
+      ].join('\n');
+      addTurn({ question, reply, mode: 'structured', clinical: true });
+      return reply;
+    }
+    const history = transcript.current.filter((turn) => !turn.clinical).slice(-PATIENT_HISTORY_LIMIT).map((turn) => ({
       question: turn.question, reply: turn.reply.slice(0, 400),
     }));
     let answer: Omit<Turn, 'question'>;
@@ -167,9 +201,11 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
     ? examOptions.filter((item) => examArea === 'all' || item.areas.includes(examArea))
     : station.interactions.filter((item) => item.group === tool).map((item) => ({ ...item, areas: [] }));
   const availableAreas = (Object.keys(EXAM_AREAS) as ExamArea[]).filter((area) => examOptions.some((item) => item.areas.includes(area)));
-  const findings = selected.map((id) => station.interactions.find((item) => item.id === id))
+  const recordedFindings = selected.map((id) => station.interactions.find((item) => item.id === id))
     .filter((item): item is Interaction => Boolean(item && (item.group === 'exploracion' || item.group === 'paraclinicos') && item.reply))
-    .reverse();
+    .reverse().map((item) => ({ ...item, kind: 'case' as const }));
+  const findings = [...supplemental, ...recordedFindings].sort((first, second) =>
+    Number(second.id === latestFinding) - Number(first.id === latestFinding));
   return <main className="simulator">
     <nav className="phase-bar" aria-label="Fases de la estación">{PHASES.map((name, index) =>
       <button key={name} className={index === phase ? 'phase current' : 'phase'} aria-current={index === phase ? 'step' : undefined}
@@ -181,7 +217,7 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
         <div className="scene"><img src={scene} alt="Escena de consulta pediátrica" />
           <div className="timer"><Clock3 size={20}/><strong aria-label={'Tiempo restante ' + clock}>{clock}</strong><progress max={STATION_MS} value={time}/></div>
           <div className="subtitle"><span><Volume2 size={20}/></span><div>{latest?.reply ?? station.opening}
-            {latest && <small>{latest.mode === 'ai' ? 'IA generativa' : 'Respuesta estructurada'}</small>}</div></div>
+            {latest && <small>{turnLabel(latest)}</small>}</div></div>
         </div>
         <div className="dialogue">
           <div className="voice-row">
@@ -204,7 +240,7 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
           {voice.voiceError && !callActive && <p className="error" role="alert">{voice.voiceError}</p>}
           {voice.listening && <p role="status">Dictando…</p>}
           {!canListen || !canSpeak ? <small>La llamada requiere micrófono y reproducción de voz compatibles. Puedes escribir tu pregunta.</small>
-            : callActive && <small>Las preguntas por voz quedan en la conversación. Usa Anamnesis para registrar los criterios evaluables.</small>}
+            : callActive && <small>Puedes pedir el examen físico o un paraclínico durante la llamada. Los hallazgos aparecen en Herramientas clínicas.</small>}
           <form className="ask" onSubmit={ask}>
             {voice.available && <button type="button" className="icon-button" aria-label={voice.listening ? 'Detener dictado' : 'Dictar en el campo de texto'}
               title={voice.listening ? 'Detener dictado' : 'Dictar en el campo de texto'} aria-pressed={voice.listening}
@@ -216,7 +252,7 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
               maxLength={400} value={text} onChange={(event) => setText(event.target.value)}/>
             <button className="button primary" aria-label="Enviar pregunta" disabled={!time || callActive || voice.listening || sending || saving || !text.trim()}><Send size={18}/></button>
           </form>
-          {tab && <div className="transcript-list">{!turns.length ? <span>Aún no has hecho preguntas.</span> : turns.map((turn, index) => <div key={index}><b>{turn.question}</b><p>{turn.reply}</p><small>{turn.mode === 'ai' ? 'IA generativa' : 'Respuesta estructurada'}</small></div>)}</div>}
+          {tab && <div className="transcript-list">{!turns.length ? <span>Aún no has hecho preguntas.</span> : turns.map((turn, index) => <div key={index}><b>{turn.question}</b><p>{turn.reply}</p><small>{turnLabel(turn)}</small></div>)}</div>}
         </div>
       </section>
       <aside className="tools card" id="station-clinical-tools" tabIndex={-1}><h2><BriefIcon/> Herramientas clínicas</h2><div className="tabs">
@@ -237,11 +273,12 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
             {requested && <small><CircleCheck size={14} aria-hidden="true"/>{tool === 'acciones' ? 'Seleccionada' : 'Solicitado'}</small>}
           </button>;
         })}
-          {!toolOptions.length && <p>Este caso no incluye {tool === 'exploracion' ? 'hallazgos de examen físico' : tool === 'paraclinicos' ? 'paraclínicos' : 'acciones'} en esta sección.</p>}</div>
+          {!toolOptions.length && <p>{tool === 'paraclinicos' ? 'Puedes solicitar un estudio por su nombre en la conversación.' : `Este caso no incluye ${tool === 'exploracion' ? 'hallazgos de examen físico' : 'acciones'} en esta sección.`}</p>}</div>
         <div className="findings"><h3><ClipboardList size={19}/> Hallazgos solicitados</h3>
           <span className="sr-only" role="status">{latestFinding && findings.find((item) => item.id === latestFinding)?.reply}</span>
           {findings.length ? <ul className="findings-list">{findings.map((item) => <li key={item.id} className={item.id === latestFinding ? 'latest' : ''}>
-            <small>{labels[item.group]}</small><strong>{item.label}</strong><p>{item.reply}</p>
+            <small>{item.kind === 'simulated' ? 'Normal simulado' : item.kind === 'unavailable' ? 'Sin resultado' : labels[item.group]}</small>
+            <strong>{item.label}</strong><p>{item.reply}</p>
           </li>)}</ul> : <p>Solicita una exploración o un paraclínico para ver su resultado aquí.</p>}
         </div>
       </aside>

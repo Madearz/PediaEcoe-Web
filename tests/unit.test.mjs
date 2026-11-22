@@ -7,7 +7,8 @@ import { createHandler, DailyLimits } from '../worker/index.mjs';
 import { grade, readInvitations, structured, validAnswers, validCase } from '../shared/clinical.mjs';
 import { PATIENT_HISTORY_LIMIT, socialReply } from '../shared/dialogue.mjs';
 import { caseGroups } from '../shared/case-groups.mjs';
-import { examAreas } from '../shared/exam.mjs';
+import { examAreas, requestedExam } from '../shared/exam.mjs';
+import { requestedStudies } from '../shared/studies.mjs';
 import { readFile } from 'node:fs/promises';
 
 const bearer = { Authorization: 'Bearer a.b.c', 'Content-Type': 'application/json' };
@@ -32,6 +33,40 @@ test('la exploración se puede localizar por todos los sistemas que indica su et
   assert.deepEqual(examAreas('Examen neurológico y signos meníngeos'), ['neurological']);
   assert.deepEqual(examAreas('Hidratación y exantema'), ['abdomen', 'skin']);
   assert.deepEqual(examAreas('Otoscopia'), ['other']);
+});
+
+test('las solicitudes de examen físico devuelven los hallazgos pertinentes y separan anamnesis y permiso', () => {
+  const lungs = { id: 'lungs', group: 'exploracion', label: 'Auscultación pulmonar', reply: 'Sibilancias bilaterales.' };
+  const vitals = { id: 'vitals', group: 'exploracion', label: 'Signos vitales', reply: 'Saturación de oxígeno 94 %.' };
+  const abdominal = { id: 'abdomen', group: 'exploracion', label: 'Palpación de abdomen', reply: 'Abdomen blando.' };
+  const notes = { id: 'history', group: 'anamnesis', label: 'Síntomas respiratorios', reply: 'Tose mucho.' };
+  const interactions = [lungs, vitals, abdominal, notes];
+  assert.deepEqual(requestedExam(interactions, 'Examen físico, por favor'), [lungs, vitals, abdominal]);
+  assert.deepEqual(requestedExam(interactions, '¿Qué escucho al auscultar?'), [lungs]);
+  assert.deepEqual(requestedExam(interactions, '¿Cuál es la saturación?'), [vitals]);
+  assert.deepEqual(requestedExam(interactions, 'Palpo el abdomen'), [abdominal]);
+  assert.deepEqual(requestedExam(interactions, '¿Qué encuentro a la otoscopia?'), []);
+  assert.equal(requestedExam(interactions, '¿Desde cuándo tiene tos?'), null);
+  assert.equal(requestedExam(interactions, '¿Puedo examinarlo?'), null);
+});
+
+test('los paraclínicos priorizan el resultado del caso y solo simulan normalidad fuera del contexto', () => {
+  const radiograph = { id: 'radiograph', group: 'paraclinicos', label: 'Radiografía de tórax', reply: 'Opacidad en base derecha.' };
+  const respiratory = { title: 'Tos', category: 'Respiratorio', scenario: 'Paciente de 8 años', opening: 'Tiene respiración rápida.',
+    interactions: [radiograph] };
+  assert.deepEqual(requestedStudies(respiratory, 'Solicito una radiografía de tórax'), { documented: [radiograph], supplemental: [] });
+  const normal = requestedStudies(respiratory, 'Pido sodio y potasio');
+  assert.equal(normal.documented.length, 0);
+  assert.deepEqual(normal.supplemental.map(({ kind, reply }) => [kind, reply]),
+    [['simulated', 'Sodio 140 mmol/L.'], ['simulated', 'Potasio 4,2 mmol/L.']]);
+  assert.deepEqual(requestedStudies(respiratory, 'Sodio y potasio, por favor'), normal);
+  const noRadiograph = { ...respiratory, interactions: [] };
+  assert.equal(requestedStudies(noRadiograph, '¿Cuál es el resultado de la radiografía de tórax?').supplemental[0].kind, 'unavailable');
+  const metabolic = { ...respiratory, interactions: [{ group: 'exploracion', label: 'Glucemia y estado mental', reply: 'Glucemia baja y somnolencia.' }] };
+  assert.deepEqual(requestedStudies(metabolic, 'Glucosa, por favor').supplemental[0],
+    { label: 'Glucosa', id: 'glucosa', kind: 'case', reply: 'Glucemia baja y somnolencia.' });
+  assert.equal(requestedStudies(respiratory, '¿Le hicieron una radiografía de tórax antes de venir?'), null);
+  assert.equal(requestedStudies(respiratory, '¿Tiene tos?'), null);
 });
 
 test('tres borradores válidos y evaluación con decisiones mutuamente excluyentes', () => {
