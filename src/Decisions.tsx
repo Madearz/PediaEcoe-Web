@@ -27,11 +27,12 @@ export function ReasoningFields({ diagnoses, observed, notes, nextTest, disabled
   </fieldset>;
 }
 
-export function TreatmentFields({ options = [], value, disabled, update }: {
-  options?: TreatmentOption[]; value: TreatmentPlan; disabled: boolean; update: (plan: TreatmentPlan) => void;
+export function TreatmentFields({ options = [], prompt, value, disabled, update }: {
+  options?: TreatmentOption[]; prompt?: string; value: TreatmentPlan; disabled: boolean; update: (plan: TreatmentPlan) => void;
 }) {
   return <fieldset className="differential-options" disabled={disabled}>
-    <legend>{options.length ? 'Pauta y seguimiento' : 'Seguimiento'}</legend>
+    <legend>{options.length ? 'Opciones de tratamiento' : 'Seguimiento'}</legend>
+    {prompt && <p>{prompt}</p>}
     {options.length > 0 && <div className="option-list" aria-label="Pautas de tratamiento">
       {options.map(({ id, label }) => <button type="button" className={'button secondary ' + (value.option === id ? 'picked' : '')}
         key={id} aria-pressed={value.option === id} onClick={() => update({ ...value, option: value.option === id ? '' : id })}>{label}</button>)}

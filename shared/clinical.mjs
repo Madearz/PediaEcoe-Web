@@ -36,6 +36,7 @@ export function validCase(data, rubric) {
       || (data.curricularGroups !== undefined && !validCurricularGroups(data.curricularGroups))
       || (data.studyResults !== undefined && !validStudyResults(data.studyResults))
       || (data.treatmentOptions !== undefined && !validTreatmentOptions(data.treatmentOptions))
+      || (data.treatmentPrompt !== undefined && (!data.treatmentOptions || !short(data.treatmentPrompt, 300)))
       || (data.treatmentOptions !== undefined ? !validPrescriptionKey(rubric.prescription, data) : rubric.prescription !== undefined)
       || (data.interview !== undefined && (!Array.isArray(data.interview) || data.interview.length > 24
         || !data.interview.every((row) => row && short(row.question, 160) && short(row.reply, 400))))

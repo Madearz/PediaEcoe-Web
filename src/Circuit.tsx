@@ -572,7 +572,7 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
         disabled={!canInteract || saving} update={(note) => updateDecisions({ ...decisionDraft,
           reasoning: [...decisionDraft.reasoning.filter((previous) => previous.diagnosis !== note.diagnosis), note],
         })} updateTest={(nextTest) => updateDecisions({ ...decisionDraft, nextTest })}/>}
-      {phase === 3 && <TreatmentFields options={station.treatmentOptions} value={decisionDraft.treatment}
+      {phase === 3 && <TreatmentFields options={station.treatmentOptions} prompt={station.treatmentPrompt} value={decisionDraft.treatment}
         disabled={!canInteract || saving} update={(treatment) => updateDecisions({ ...decisionDraft, treatment })}/>}
     </section>
     {session.hasEvolution && (action || evolution) && <section className="card station-options">

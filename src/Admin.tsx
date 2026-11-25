@@ -252,6 +252,7 @@ function CaseEditor() {
         }
       } catch { throw new Error('Revisa el formato JSON de interacciones, criterios y errores críticos.'); }
       if (current.vaccinationCard && !current.vaccinationCard.summary.trim() && !current.vaccinationCard.doses.length) delete current.vaccinationCard;
+      if (!current.treatmentPrompt?.trim()) delete current.treatmentPrompt;
       if (current.studyResults && (!validStudyResults(current.studyResults)
           || current.studyResults.some((item) => formatStudyResult(item) === MISSING_STUDY_VALUE))) {
         throw new Error('Revisa los paraclínicos. Escribe el resultado de cada estudio y, para resultados cuantitativos, el valor numérico.');
@@ -391,7 +392,7 @@ function CaseEditor() {
             if (remaining.length) {
               nextData.treatmentOptions = remaining;
               if (nextKey.prescription) nextKey.prescription = { ...nextKey.prescription, accepted: nextKey.prescription.accepted.filter((id) => id !== row.id) };
-            } else { delete nextData.treatmentOptions; delete nextKey.prescription; }
+            } else { delete nextData.treatmentOptions; delete nextData.treatmentPrompt; delete nextKey.prescription; }
             setData(nextData); setRubric(nextKey);
           }}>Quitar pauta</button>
         </div>)}
@@ -399,6 +400,8 @@ function CaseEditor() {
           onClick={() => setData({ ...data, treatmentOptions: [...(data.treatmentOptions ?? []), { id: 'pauta-' + crypto.randomUUID(), label: '' }] })}>
           <Plus size={16}/> Agregar pauta</button>
         {!!data.treatmentOptions?.length && <>
+          <label>Contexto de la decisión<textarea rows={2} maxLength={300} value={data.treatmentPrompt ?? ''}
+            onChange={(event) => setData({ ...data, treatmentPrompt: event.target.value })}/></label>
           <label>Fuente clínica<input required maxLength={300} value={rubric.prescription?.source ?? ''} onChange={(event) =>
             setRubric({ ...rubric, prescription: { accepted: [], ...rubric.prescription, source: event.target.value } })}/></label>
           <label>Retroalimentación<textarea rows={2} maxLength={400} value={rubric.prescription?.explanation ?? ''} onChange={(event) =>

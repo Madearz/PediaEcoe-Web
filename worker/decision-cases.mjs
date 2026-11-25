@@ -18,6 +18,61 @@ const oralRehydration = {
 };
 
 const courseSamples = {
+  'practica100-asma-pecho-silente': {
+    action: '3f5c4021a773c1', opening: 'Al inicio silbaba fuerte y ahora casi no se oye, pero le cuesta más respirar.',
+    context: 'Mientras se activa el equipo de reanimación y se prepara apoyo ventilatorio, elige el esquema inicial para la exacerbación asmática grave.',
+    options: [
+      { id: 'asma-rescate', label: 'Salbutamol e ipratropio inhalados, corticoide sistémico temprano y oxígeno según saturación.' },
+      { id: 'asma-alto-flujo-solo', label: 'Cánula nasal de alto flujo como única medida, sin broncodilatadores de rescate.' },
+      { id: 'asma-antibiotico-solo', label: 'Ceftriaxona intravenosa como primera medida para resolver el broncoespasmo.' },
+    ],
+    key: { accepted: ['asma-rescate'], source: 'Royal Children’s Hospital. Acute asthma. https://www.rch.org.au/clinicalguide/guideline_index/Asthma_Acute/',
+      explanation: 'El pecho silente con fatiga puede indicar deterioro ventilatorio. Los broncodilatadores de rescate y el corticoide se acompañan de soporte, reevaluación inmediata y escalamiento si hace falta.' },
+  },
+  'practica100-asma-alta': {
+    action: '3543171c8c48a2', opening: 'Ya respira mejor, pero en casa no sabemos usar el espaciador.',
+    context: 'Si el equipo confirma criterios de alta y prescribe salbutamol en inhalador como rescate, elige cómo preparar el manejo en casa.',
+    options: [
+      { id: 'asma-alta-espaciador', label: 'Salbutamol con espaciador según el plan de rescate, demostración de técnica y revisión del tratamiento controlador y del seguimiento.' },
+      { id: 'asma-alta-antibiotico', label: 'Sustituir el inhalador de rescate por amoxicilina oral.' },
+      { id: 'asma-alta-sin-entrenar', label: 'Indicar salbutamol sin espaciador y omitir la comprobación de la técnica.' },
+    ],
+    key: { accepted: ['asma-alta-espaciador'], source: 'Royal Children’s Hospital. Acute asthma. https://www.rch.org.au/clinicalguide/guideline_index/Asthma_Acute/',
+      explanation: 'Antes del alta se revisan la técnica, el acceso a los inhaladores, el plan escrito y el seguimiento.' },
+  },
+  'practica100-bronquiolitis-apnea': {
+    action: '0c01726b422211', opening: 'Desde ayer está congestionado y hoy se quedó unos segundos sin respirar.',
+    context: 'Tras la valoración urgente, la ventilación espontánea se mantiene sin nuevas apneas. Persiste la hipoxemia y no mejora el trabajo respiratorio con oxígeno de bajo flujo. Elige el siguiente soporte bajo monitorización.',
+    options: [
+      { id: 'bronquiolitis-alto-flujo', label: 'Cánula nasal de alto flujo con monitorización y reevaluación estrecha por el equipo pediátrico.' },
+      { id: 'bronquiolitis-salbutamol', label: 'Salbutamol nebulizado de rutina como sustituto del soporte de oxígeno.' },
+      { id: 'bronquiolitis-aire-ambiente', label: 'Retirar el oxígeno y observar en aire ambiente pese a la hipoxemia persistente.' },
+    ],
+    key: { accepted: ['bronquiolitis-alto-flujo'], source: 'Royal Children’s Hospital. Bronchiolitis. https://www.rch.org.au/clinicalguide/guideline_index/Bronchiolitis_Guideline/',
+      explanation: 'El alto flujo es una opción de escalamiento cuando persisten la hipoxemia y la dificultad respiratoria pese al bajo flujo. Las apneas recurrentes o la ventilación insuficiente obligan a reevaluar de inmediato el soporte ventilatorio.' },
+  },
+  'practica100-neumonia-derrame': {
+    action: '78d26abcdd0f47', opening: 'Ya está en tratamiento, pero sigue con fiebre y le duele al respirar profundo.',
+    context: 'Para esta decisión, supón que el cultivo del líquido pleural confirma Staphylococcus aureus resistente a meticilina (SARM). Elige el antibiótico dirigido mientras el equipo valora el drenaje.',
+    options: [
+      { id: 'empiema-vancomicina', label: 'Vancomicina intravenosa con ajuste y monitorización por el equipo hospitalario.' },
+      { id: 'empiema-ceftriaxona-sola', label: 'Ceftriaxona intravenosa como único antibiótico dirigido al SARM.' },
+      { id: 'empiema-amoxicilina', label: 'Amoxicilina oral como único antibiótico dirigido al SARM.' },
+    ],
+    key: { accepted: ['empiema-vancomicina'], source: 'PIDS/IDSA. Pediatric community-acquired pneumonia. https://pmc.ncbi.nlm.nih.gov/articles/PMC7107838/',
+      explanation: 'El supuesto de la pregunta confirma SARM, por lo que se elige un antibiótico activo frente al cultivo. El manejo del derrame y la vigilancia de la función renal se coordinan en el hospital.' },
+  },
+  'practica100-cefalea-meningismo': {
+    action: 'eb06e26eb1363e', opening: 'Tiene dolor de cabeza desde ayer y hoy se le cayó un vaso de la mano.',
+    context: 'Ante sospecha de meningitis bacteriana, la focalidad obliga a diferir la punción lumbar. Elige qué iniciar mientras se evalúa la seguridad del procedimiento.',
+    options: [
+      { id: 'meningismo-ceftriaxona', label: 'Iniciar ceftriaxona intravenosa como parte del esquema empírico del protocolo local, sin esperar la punción lumbar.' },
+      { id: 'meningismo-esperar', label: 'Diferir los antimicrobianos hasta obtener el resultado del líquido cefalorraquídeo.' },
+      { id: 'meningismo-amoxicilina', label: 'Dar amoxicilina oral como único tratamiento inicial y reevaluar al día siguiente.' },
+    ],
+    key: { accepted: ['meningismo-ceftriaxona'], source: 'Royal Children’s Hospital. Meningitis and encephalitis. https://www.rch.org.au/clinicalguide/guideline_index/Meningitis_and_encephalitis/',
+      explanation: 'La focalidad cambia la secuencia de la punción lumbar. El esquema intravenoso empírico se inicia sin esperar ese procedimiento y se ajusta al protocolo y a los hallazgos.' },
+  },
   'demo-deshidratacion': {
     action: '567f73dd8d76', opening: 'Desde ayer ha ido muchas veces al baño. Ha pedido agua más de lo normal.',
     context: 'Para la pauta de rehidratación, usa el Plan B de la OMS.', ...oralRehydration,
@@ -112,7 +167,7 @@ export function withPracticeDecisions(id, station, shuffle) {
   const treatment = course && !data.treatmentOptions && !rubric.prescription;
   return {
     public: data.treatmentOptions || treatment ? { ...data,
-      ...(treatment && course.context ? { scenario: `${data.scenario} ${course.context}` } : {}),
+      ...(treatment && course.context ? { treatmentPrompt: course.context } : {}),
       treatmentOptions: shuffle(data.treatmentOptions ?? course.options),
     } : data,
     rubric: { ...rubric, ...(reasoning ? { reasoning: [sample] } : {}), ...(treatment ? { prescription: course.key } : {}) },
