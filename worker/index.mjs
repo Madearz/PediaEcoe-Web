@@ -351,9 +351,10 @@ async function simulateStudies(db, env, caller, currentCase, caseId, question, i
   if (!Array.isArray(ids) || !ids.length || ids.length > 6 || ids.some((id) => typeof id !== 'string' || id.length > 130)) {
     throw new ApiError(400, 'Selecciona hasta seis paraclínicos para simular.');
   }
-  const studies = requestedStudies(currentCase, question, caseId)?.supplemental
-    .filter(({ id, canSimulate }) => canSimulate && ids.includes(id)).slice(0, 6) ?? [];
-  if (!studies.length) return { results: [] };
+  const requested = requestedStudies(currentCase, question, caseId)?.supplemental.filter(({ id }) => ids.includes(id)) ?? [];
+  const ready = requested.filter(({ kind }) => kind === 'simulated').map(({ id, reply }) => ({ id, reply }));
+  const studies = requested.filter(({ canSimulate }) => canSimulate).slice(0, 6);
+  if (!studies.length) return { results: ready };
   const observations = currentCase.interactions.filter(({ group }) => ['anamnesis', 'exploracion', 'paraclinicos'].includes(group))
     .map(({ label, reply }) => ({ label, reply }));
   const messages = [{ role: 'system', content: [
@@ -369,11 +370,11 @@ async function simulateStudies(db, env, caller, currentCase, caseId, question, i
     const parsed = answer && JSON.parse(answer.reply.replace(/^```(?:json)?\s*|\s*```$/gi, ''));
     if (Array.isArray(parsed?.results)) results = parsed.results;
   } catch { /* Use the available simulated values if the model's report cannot be read. */ }
-  return { results: studies.flatMap(({ id }) => {
+  return { results: [...ready, ...studies.flatMap(({ id }) => {
     const found = results.find((item) => item?.id === id && typeof item.reply === 'string' && item.reply.trim());
     const reply = (found && formatSimulatedStudy(id, found.reply)) || fallbackStudyValue(currentCase, id);
     return reply ? [{ id, reply }] : [];
-  }) };
+  })] };
 }
 
 function readQuestion(input) {

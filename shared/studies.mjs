@@ -81,7 +81,7 @@ const studies = [
     normal: 'Sin líquido libre ni colecciones en el informe simulado.' },
   { id: 'eco-renal', label: 'Ecografía renal', aliases: /(?:ecografia renal|ultrasonido renal|(?:eco|ecografia|ultrasonido) de rinones)/,
     related: [renal, /masa|dilatacion del sistema colector/], normal: 'Riñones sin dilatación del sistema colector en el informe simulado.' },
-  { id: 'eco-cardiaco', label: 'Ecocardiograma', aliases: /(?:ecocardiogra\w*|(?:eco|ecografia|ultrasonido) (?:cardiac[oa]|(?:del |de )?corazon))/,
+  { id: 'eco-cardiaco', label: 'Ecocardiograma', aliases: /(?:(?:ecocardiogra\w*|(?:eco|ecografia|ultrasonido) (?:cardiac[oa]|(?:del |de )?corazon))(?:(?: con)? doppler| transtoracico)?)/,
     related: [/cardiac|cardiomiop|cardiopati|pericard|miocard|soplo|cianosis|kawasaki|arritmia|sincop|disnea|choque/],
     normal: 'Cavidades de tamaño habitual para la edad y función sistólica biventricular conservada. Sin derrame pericárdico.' },
   { id: 'eco-pelvico', label: 'Ecografía pélvica', aliases: /(?:ecografia pelvica|(?:eco|ecografia|ultrasonido) (?:de )?pelvis|eco pelvico)/, related: [digestive], normal: null },
@@ -103,6 +103,24 @@ const ironFollowUp = {
   vcm: 'VCM 68 fL.',
   ferritina: 'Ferritina 8 ng/mL.',
 };
+
+// Fictional reports for legacy stations where a normal echo could contradict the scenario.
+const cardiacReports = {
+  'practica100-adaptacion-reevaluacion': 'Evaluación ecocardiográfica diferida hasta estabilizar la ventilación y la circulación.',
+  'practica100-fiebre-petequias': 'Vista cardíaca de cabecera sin líquido pericárdico. El estudio focal no incluye mediciones Doppler completas.',
+  'practica100-lupus-serositis': 'Separación pericárdica circunferencial de 6 mm, sin colapso de cavidades derechas.',
+  'practica100-meckel-choque': 'Cavidades izquierdas de pequeño volumen con contracción ventricular vigorosa. Sin líquido pericárdico.',
+  'practica100-miocarditis-escolar': 'Hipocinesia global del ventrículo izquierdo. Fracción de eyección del ventrículo izquierdo de 38 %.',
+  'practica100-reumatica-carditis-silente': 'Doppler color con chorro de regurgitación mitral visible en dos planos. El Doppler espectral muestra un chorro pansistólico.',
+  'practica100-soplo-lactante': 'Aurícula y ventrículo izquierdos dilatados, con función sistólica ventricular izquierda conservada.',
+  'practica100-taquicardia-mala-perfusion': 'Ventana subcostal sin líquido pericárdico. Evaluación Doppler completa limitada durante la taquicardia.',
+  'practica100-taquipnea-transitoria': 'Función sistólica biventricular conservada. Tabique interventricular sin aplanamiento sistólico en las vistas obtenidas.',
+};
+
+const noncardiacEchoCases = new Set([
+  'practica100-ferropenia-adolescente', 'practica100-quemadura-electrica',
+  'practica100-rehidratacion-falla-oral', 'practica100-tce-conmocion',
+]);
 
 const numericStudies = new Set(['hemograma', 'hemoglobina', 'vcm', 'ferritina', 'hematocrito', 'plaquetas', 'reticulocitos',
   'glucosa', 'cetonas', 'sodio', 'potasio', 'electrolitos', 'creatinina', 'hepatica', 'bilirrubina', 'albumina',
@@ -237,6 +255,14 @@ function spirometryExample(data) {
   return { reply: 'Prebroncodilatador: FEV₁ 92 % del predicho, FEV₁/CVF 0,84. Posbroncodilatador: FEV₁ 95 % del predicho, FEV₁/CVF 0,85.', kind: 'simulated' };
 }
 
+function echocardiogramExample(study, context, caseId) {
+  const report = cardiacReports[caseId];
+  if (report) return { reply: report, kind: caseId === 'practica100-adaptacion-reevaluacion' ? 'unavailable' : 'simulated' };
+  const normal = noncardiacEchoCases.has(caseId) ? study.normal : exampleValue(study, context);
+  return normal ? { reply: normal, kind: 'simulated' }
+    : { reply: 'Esta estación no dispone de un informe cardíaco interpretable. Utiliza los demás hallazgos clínicos disponibles.', kind: 'unavailable' };
+}
+
 export function isStudyListRequest(question) {
   const text = normalizeClinicalRequest(question);
   return /\b(?:que|cuales) (?:son )?(?:los )?(?:paraclinicos|estudios|examenes de laboratorio) (?:hay|estan disponibles|tienen disponibles|puedo (?:solicitar|pedir|consultar))\b/.test(text)
@@ -342,6 +368,10 @@ export function requestedStudies(data, question, caseId) {
     const caseResult = results[study.id] ?? examReport(study, data);
     if (study.id === 'espirometria' && !caseResult) {
       supplemental.push({ id: study.id, label: study.label, ...spirometryExample(data) });
+      continue;
+    }
+    if (study.id === 'eco-cardiaco' && !caseResult) {
+      supplemental.push({ id: study.id, label: study.label, ...echocardiogramExample(study, context, caseId) });
       continue;
     }
     const numeric = numericStudies.has(study.id);

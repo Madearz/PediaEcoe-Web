@@ -12,7 +12,7 @@ import { createVoiceCall, type CallPhase, type CallState } from './voice-call';
 import { PHASES, SINGLE, STATION_MS, structured, type CaseData, type Grade, type Group, type Interaction } from '../shared/clinical.mjs';
 import { isVaccinationCardRequest, patientHistoryReply, PATIENT_HISTORY_LIMIT, vaccinationCard } from '../shared/dialogue.mjs';
 import { completeExam, EXAM_AREAS, examAreas, examRequest, systemExam, type ExamArea, type ExamReport } from '../shared/exam.mjs';
-import { availableStudyOptions, displayStoredStudy, isStudyListRequest, MISSING_STUDY_VALUE, requestedStudies, studySuggestions, type StudyFinding } from '../shared/studies.mjs';
+import { availableStudyOptions, displayStoredStudy, fallbackStudyValue, isStudyListRequest, MISSING_STUDY_VALUE, requestedStudies, studySuggestions, type StudyFinding } from '../shared/studies.mjs';
 import { FOLLOW_UP, JUSTIFICATION_LIMIT, registerAnamnesis, type FollowUp } from '../shared/learning.mjs';
 import { type ReasoningNote, type TreatmentPlan } from '../shared/decisions.mjs';
 import { ReasoningFields, TreatmentFields } from './Decisions';
@@ -309,8 +309,8 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
       for (const item of extra.filter(({ canSimulate }) => canSimulate)) {
         const cached = supplemental.find(({ id, kind }) => id === item.id && kind === 'simulated');
         const report = generated.find(({ id }) => 'study:' + id === item.id);
-        if (cached || report) { item.reply = (cached ?? report)!.reply; item.kind = 'simulated'; }
-        else item.reply = 'No se pudo generar el informe ahora. Puedes solicitarlo de nuevo.';
+        const reply = cached?.reply ?? report?.reply ?? fallbackStudyValue(station, item.id.slice(6));
+        if (reply) { item.reply = reply; item.kind = 'simulated'; }
       }
       if (exam && !documented.length && !extra.length && !studies) {
         extra.push({ id: 'exam:unavailable', group: 'exploracion', label: 'Exploración solicitada',

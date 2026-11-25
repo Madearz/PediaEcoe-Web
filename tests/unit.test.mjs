@@ -880,6 +880,39 @@ test('los paraclínicos nuevos se simulan solo para la estación autenticada y s
   assert.equal(requestedStudies(data, 'Solicito un eco de cadera').supplemental[0].canSimulate, true);
 });
 
+test('el ecocardiograma no depende del proveedor y respeta informes guardados y casos diferidos', async () => {
+  const caseId = 'practica100-miocarditis-escolar';
+  const data = { ...example[0].data, title: 'Fatiga y taquicardia tras un cuadro viral', interactions: [] };
+  const question = 'Ecocardiograma Doppler';
+  const echo = requestedStudies(data, question, caseId).supplemental[0];
+  assert.equal(echo.kind, 'simulated');
+  assert.match(echo.reply, /38 %/);
+  assert.equal(echo.canSimulate, undefined);
+  const offTopic = requestedStudies({ ...data, title: 'Dermatitis', category: '', scenario: '', opening: '' }, 'eco del corazón');
+  assert.match(offTopic.supplemental[0].reply, /función sistólica biventricular conservada/);
+  const limited = requestedStudies(data, question, 'practica100-adaptacion-reevaluacion').supplemental[0];
+  assert.equal(limited.kind, 'unavailable');
+  assert.match(limited.reply, /diferida hasta estabilizar/);
+  const existing = { id: 'eco-guardado', group: 'paraclinicos', label: 'Ecocardiograma', reply: 'FEVI 49 %.' };
+  assert.deepEqual(requestedStudies({ ...data, interactions: [existing] }, question, caseId),
+    { documented: [existing], supplemental: [] });
+
+  const db = { async get(path) {
+    if (path.startsWith('authorized_emails/')) return { data: { active: true } };
+    if (path.startsWith('simulation_sessions/')) return { data: { uid: 'student', index: 0, deadline: Date.now() + 10000, caseIds: [caseId] } };
+    return { data: { cases: [{ public: data }] } };
+  } };
+  const app = createHandler({ verify: async () => ({ uid: 'student', email: 'student@example.com' }), database: () => db });
+  let providerCalls = 0;
+  const response = await app(call('/circuits/circuit-id/studies', { question, ids: [echo.id], index: 0 }), {
+    AI_ENABLED: 'true', AI: { async run() { providerCalls++; throw Error('Cuota agotada'); } },
+    LIMITS: { getByName: () => ({ fetch: async () => new Response(null, { status: 204 }) }) },
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { results: [{ id: echo.id, reply: echo.reply }] });
+  assert.equal(providerCalls, 0);
+});
+
 test('el repaso distingue decisiones incorrectas de criterios omitidos y sirve con notas antiguas', async () => {
   const { reviewFacts, reviewReply } = await import('../shared/review.mjs');
   const { data, rubric } = example[0];
