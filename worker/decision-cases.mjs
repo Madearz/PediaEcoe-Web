@@ -57,19 +57,62 @@ const courseSamples = {
     key: { accepted: ['albendazol-repetir'], source: 'CDC. Clinical Overview of Pinworm Infection. https://www.cdc.gov/pinworm/hcp/clinical-overview/index.html',
       explanation: 'La segunda toma cubre los parásitos que eclosionan después de la primera. El manejo familiar y la higiene ayudan a prevenir la reinfección.' },
   },
+  'practica100-dengue-ambulatorio': {
+    action: '144a2ef7a4eb73', opening: 'Hay dengue en el barrio y tengo fiebre, pero sigo tomando agua.',
+    context: 'Si requiere un antipirético, selecciona la pauta pediátrica de la OPS para dengue sin signos de alarma.',
+    options: [
+      { id: 'dengue-pcm', label: 'Acetaminofén 10 mg/kg por dosis, por vía oral cada 6 horas si lo necesita.' },
+      { id: 'dengue-aines', label: 'Ibuprofeno por vía oral como antipirético de primera elección.' },
+      { id: 'dengue-pcm-intervalo', label: 'Acetaminofén 10 mg/kg por dosis, por vía oral cada 2 horas.' },
+    ],
+    key: { accepted: ['dengue-pcm'], source: 'OPS. Algoritmos para el manejo clínico del dengue. https://www.paho.org/sites/default/files/2024-05/2024-cde-algoritmos-manejo-clinico-dengue-es_0.pdf',
+      explanation: 'El acetaminofén es el antipirético recomendado en este escenario. El seguimiento incluye hidratación y vigilancia de los signos de alarma al descender la fiebre.' },
+  },
+  'practica100-crup-observacion': {
+    action: 'c039fd76d46e4a', opening: 'Parecía estar mucho mejor y volvió a respirar con ruido estando tranquilo.',
+    context: 'Si la reevaluación confirma crup moderado o grave y se indica adrenalina L, selecciona la pauta nebulizada según la Canadian Paediatric Society.',
+    options: [
+      { id: 'crup-adrenalina', label: 'Adrenalina L 1 mg/mL, 5 mL por nebulización, con observación posterior.' },
+      { id: 'crup-adrenalina-iv', label: 'Adrenalina L 1 mg/mL, 5 mL en bolo intravenoso.' },
+      { id: 'crup-nebulizar-alta', label: 'Adrenalina L 1 mg/mL, 5 mL por nebulización y alta inmediata al mejorar.' },
+    ],
+    key: { accepted: ['crup-adrenalina'], source: 'Canadian Paediatric Society. Acute management of croup. https://cps.ca/en/documents/position/acute-management-of-croup',
+      explanation: 'El efecto de la adrenalina nebulizada es transitorio. Se necesita observación posterior y reevaluación antes de considerar el alta.' },
+  },
 };
+
+function bankDecisions(data, rubric) {
+  const actions = data.interactions.filter(({ group }) => group === 'acciones');
+  const followUps = data.interactions.filter(({ group }) => group === 'cierre');
+  const expected = new Set(rubric.criteria.map(({ id }) => id));
+  const action = actions.find(({ id }) => expected.has(id));
+  const wrongAction = actions.find(({ id }) => !expected.has(id));
+  const followUp = followUps.find(({ id }) => expected.has(id));
+  const wrongFollowUp = followUps.find(({ id }) => !expected.has(id));
+  if (!action || !wrongAction || !followUp || !wrongFollowUp) return null;
+  const options = [action, wrongAction].flatMap((plan, index) => [followUp, wrongFollowUp].map((check, position) => ({
+    id: `plan-${index}-${position}`,
+    label: [plan.label, check.label].map((label) => label.replace(/[.!?]+$/, '')).join('. ') + '.',
+  })));
+  if (options.some(({ label }) => label.length > 240)) return null;
+  return { options, key: { accepted: ['plan-0-0'], source: rubric.reference,
+    explanation: 'En esta estación se evalúa el conjunto de la conducta inicial y el seguimiento o la comunicación del plan.' } };
+}
 
 export function withPracticeDecisions(id, station, shuffle) {
   const { public: data, rubric } = station;
   const ids = new Set(data.interactions.map((item) => item.id));
-  const sample = reasoningSamples[id];
+  const bankCase = id.startsWith('practica100-');
+  const support = bankCase ? rubric.criteria.filter(({ domain }) => domain === 1).map(({ id }) => id).slice(0, 8) : [];
+  const sample = reasoningSamples[id] ?? (support.length ? { diagnosis: rubric.criteria.find(({ domain }) => domain === 2)?.id, support } : null);
   const reasoning = !rubric.reasoning && sample && ids.has(sample.diagnosis) && sample.support.every((item) => ids.has(item));
-  const course = courseSamples[id];
-  const treatment = course && !data.treatmentOptions && !rubric.prescription && ids.has(course.action)
-    && data.opening === course.opening;
+  const sampleCourse = courseSamples[id];
+  const course = sampleCourse && ids.has(sampleCourse.action) && data.opening === sampleCourse.opening ? sampleCourse
+    : bankCase ? bankDecisions(data, rubric) : null;
+  const treatment = course && !data.treatmentOptions && !rubric.prescription;
   return {
     public: data.treatmentOptions || treatment ? { ...data,
-      ...(treatment ? { scenario: `${data.scenario} ${course.context}` } : {}),
+      ...(treatment && course.context ? { scenario: `${data.scenario} ${course.context}` } : {}),
       treatmentOptions: shuffle(data.treatmentOptions ?? course.options),
     } : data,
     rubric: { ...rubric, ...(reasoning ? { reasoning: [sample] } : {}), ...(treatment ? { prescription: course.key } : {}) },

@@ -1,4 +1,5 @@
 import { DOMAINS } from './clinical.mjs';
+import { hospitalHistoryQuestion } from './dialogue.mjs';
 import { normalizeClinicalRequest } from './exam.mjs';
 
 export const JUSTIFICATION_LIMIT = 500;
@@ -39,14 +40,16 @@ const topics = {
 };
 
 function topicsIn(text) {
-  return Object.keys(topics).filter((key) => topics[key].test(text));
+  const detected = Object.keys(topics).filter((key) => topics[key].test(text));
+  if (hospitalHistoryQuestion(text)) detected.push('hospitalizacion');
+  return detected;
 }
 
 export function registerAnamnesis(interactions, question, previous = []) {
   const text = normalizeClinicalRequest(question);
   const history = interactions.filter((item) => item.group === 'anamnesis');
   const exact = history.filter((item) => text === normalizeClinicalRequest(item.label));
-  const questionLike = question.includes('?') || /\b(?:que|como|cuando|desde|cuanto|tien|han|puede|cuent|not|come|orina|bebe|esta)\w*\b/.test(text);
+  const questionLike = question.includes('?') || hospitalHistoryQuestion(text) || /\b(?:que|como|cuando|desde|cuanto|tien|han|puede|cuent|not|come|orina|bebe|esta)\w*\b/.test(text);
   const mentioned = questionLike ? topicsIn(text) : [];
   const recent = previous.filter((key) => key.startsWith('last:')).map((key) => key.slice(5));
   const inferred = mentioned.length === 1 && ['inicio', 'evolucion'].includes(mentioned[0]);
