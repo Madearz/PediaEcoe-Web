@@ -760,7 +760,7 @@ test('los paraclínicos nuevos se simulan solo para la estación autenticada y s
     { id: 'glucosa', reply: 'Glucosa 400 mg/dL.' }];
   const env = { AI_ENABLED: 'true', AI: { run: async () => {
     providerCalls++;
-    return { response: JSON.stringify({ results: results.map((result) => ({ ...result, reply: result.reply + ' Se considera elevado.' })) }) };
+    return { response: JSON.stringify({ results: results.map((result) => ({ ...result, reply: result.reply + ' Rango de referencia 2–5 mg/L.' })) }) };
   } },
     LIMITS: { getByName: () => ({ fetch: async () => new Response(null, { status: 204 }) }) } };
   const path = '/circuits/circuit-id/studies';

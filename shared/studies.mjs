@@ -79,7 +79,9 @@ const studies = [
     normal: 'Sin líquido libre ni colecciones en el informe simulado.' },
   { id: 'eco-renal', label: 'Ecografía renal', aliases: /(?:ecografia renal|ultrasonido renal|(?:eco|ecografia|ultrasonido) de rinones)/,
     related: [renal, /masa|dilatacion del sistema colector/], normal: 'Riñones sin dilatación del sistema colector en el informe simulado.' },
-  { id: 'eco-cardiaco', label: 'Ecocardiograma', aliases: /(?:ecocardiogra\w*|(?:eco|ecografia|ultrasonido) (?:cardiac[oa]|(?:del |de )?corazon))/, related: [chest], normal: null },
+  { id: 'eco-cardiaco', label: 'Ecocardiograma', aliases: /(?:ecocardiogra\w*|(?:eco|ecografia|ultrasonido) (?:cardiac[oa]|(?:del |de )?corazon))/,
+    related: [/cardiac|cardiomiop|cardiopati|pericard|miocard|soplo|cianosis|kawasaki|arritmia|sincop|disnea|choque/],
+    normal: 'Cavidades de tamaño habitual para la edad y función sistólica biventricular conservada. Sin derrame pericárdico.' },
   { id: 'eco-pelvico', label: 'Ecografía pélvica', aliases: /(?:ecografia pelvica|(?:eco|ecografia|ultrasonido) (?:de )?pelvis|eco pelvico)/, related: [digestive], normal: null },
   { id: 'ecografia', label: 'Ecografía', aliases: /(?:eco|ecografia|ultrasonido)/, related: [], normal: null },
   { id: 'radiografia', label: 'Radiografía', aliases: /(?:radiografia|rx)/, related: [], normal: null },
@@ -124,8 +126,10 @@ export function formatSimulatedStudy(id, reply) {
     .map((line) => line.split(/(?:[,;]\s*|\s+)lo cual |(?:[,;]\s*|\s+)lo que (?:indica|sugiere)\b/i)[0])
     .filter((line) => !/\b(?:sugiere|sugieren|sugestiv[oa]|compatible con|diagn[oó]stic\w*|se recomiend\w*|recomiendo|tratamiento|mantener hidratad\w*|es posible que|si los s[ií]ntomas)\b/i.test(line))
     .slice(0, 2).join(' ').slice(0, 400);
-  const measured = rawStudyMeasurements(reply);
-  const unitless = reply.match(/\b(?:pH|INR)\s*(?:de |es de |: *)?\d+(?:[.,]\d+)?\b/gi) ?? [];
+  const clean = reply.split(/\b(?:rangos? (?:de|normal|habitual)|valor(?:es)? (?:de referencia|esperado\w*)|se considera|(?:lo cual|lo que) (?:indica|sugiere))\b/i)[0]
+    .replace(/\b\d[\d.,]*\s*[-–—]\s*\d[\d.,]*\s*(?:[a-zµμ]+\s*\/\s*[a-zµμ]+|%|fL\b|pg\b|s\b)/gi, '');
+  const measured = rawStudyMeasurements(clean);
+  const unitless = clean.match(/\b(?:pH|INR)\s*(?:de |es de |: *)?\d+(?:[.,]\d+)?\b/gi) ?? [];
   const values = [...new Set([measured.replace(/\.$/, ''), ...unitless].filter(Boolean))].join('; ');
   return values ? `${values}.` : '';
 }
