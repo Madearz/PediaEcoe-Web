@@ -184,6 +184,12 @@ function examReport(study, data) {
   }
 }
 
+export function isStudyListRequest(question) {
+  const text = normalizeClinicalRequest(question);
+  return /\b(?:que|cuales) (?:son )?(?:los )?(?:paraclinicos|estudios|examenes de laboratorio) (?:hay|estan disponibles|tienen disponibles|puedo (?:solicitar|pedir|consultar))\b/.test(text)
+    || /\b(?:lista|catalogo) de (?:los )?(?:paraclinicos|estudios)\b/.test(text);
+}
+
 export function studySuggestions(data, caseId) {
   const results = stationStudyResults(data, caseId);
   const clinicalContext = studyContext(data, data.interactions.filter((item) => !['razonamiento', 'acciones', 'cierre'].includes(item.group)));
@@ -216,6 +222,22 @@ export function stationStudySamples(data, caseId) {
   });
 }
 
+export function availableStudyOptions(data, caseId) {
+  const existing = data.interactions.filter((item) => item.group === 'paraclinicos');
+  const edited = data.studyResults ?? [];
+  const stored = [...existing.map((item) => displayStoredStudy(data, item)),
+    ...edited.filter((item) => !existing.some(({ id }) => id === item.id)).map((item) => ({ ...item, reply: formatStudyResult(item) }))];
+  const seen = new Set(stored.map(({ label }) => normalizeClinicalRequest(label)));
+  const options = stored.filter(({ reply }) => reply && reply !== MISSING_STUDY_VALUE)
+    .map(({ id, label }) => ({ id: 'stored:' + id, label, kind: 'case' }));
+  for (const study of studies) {
+    if ([...seen].some((label) => matchesStudy(study, label))) continue;
+    const result = requestedStudies(data, study.label, caseId)?.supplemental.find(({ id }) => id === study.id);
+    if (result && result.kind !== 'unavailable') options.push({ id: study.id, label: study.label, kind: result.kind });
+  }
+  return options.sort((first, second) => Number(second.kind === 'case') - Number(first.kind === 'case'));
+}
+
 export function requestedStudies(data, question, caseId) {
   const text = normalizeClinicalRequest(question);
   const matched = studies.filter((study) => matchesStudy(study, text));
@@ -235,7 +257,8 @@ export function requestedStudies(data, question, caseId) {
     if (item.group !== 'paraclinicos') return false;
     if (edited.some((entry) => entry.id === item.id)) return true;
     if (!item.reply) return false;
-    if (text === normalizeClinicalRequest(item.label) || (generic && !requested.length)) return true;
+    const name = normalizeClinicalRequest(item.label);
+    if (text === name || (explicit && (` ${text} `).includes(` ${name} `)) || (generic && !requested.length)) return true;
     const label = normalizeClinicalRequest(item.label + ' ' + item.reply);
     return requested.some((study) => matchesStudy(study, label)
       && !edited.some((entry) => matchesStudy(study, normalizeClinicalRequest(entry.label))));

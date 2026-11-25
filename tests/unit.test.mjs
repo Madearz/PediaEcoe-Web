@@ -10,7 +10,7 @@ import { caseGroups } from '../shared/case-groups.mjs';
 import { examAreas, requestedExam, systemExam } from '../shared/exam.mjs';
 import { practiceFocus, registerAnamnesis } from '../shared/learning.mjs';
 import { addDiagnosticChoices } from '../worker/evolutions.mjs';
-import { displayStoredStudy, MISSING_STUDY_VALUE, requestedStudies, studySuggestions } from '../shared/studies.mjs';
+import { availableStudyOptions, displayStoredStudy, isStudyListRequest, MISSING_STUDY_VALUE, requestedStudies, studySuggestions } from '../shared/studies.mjs';
 import { readFile } from 'node:fs/promises';
 
 const bearer = { Authorization: 'Bearer a.b.c', 'Content-Type': 'application/json' };
@@ -325,19 +325,20 @@ test('Worker bloquea IA para cuenta anónima, sin invitación, revocada o circui
   assert.equal((await app(call(path, { question: '¿Desde cuándo?' }), env)).status, 404);
   assert.equal(providerCalls, 0);
   uid = 'student';
-  assert.deepEqual(await (await app(call(path, introduction), env)).json(),
+  const fallback = { ...env, AI_ENABLED: 'false' };
+  assert.deepEqual(await (await app(call(path, introduction), fallback)).json(),
     { mode: 'structured', reply: 'Mucho gusto. Sí, claro. Puede preguntarme.' });
   const vaccination = { question: '¿Tiene las vacunas al día?' };
-  assert.match((await (await app(call(path, vaccination), env)).json()).reply, /revisar el carné/);
+  assert.match((await (await app(call(path, vaccination), fallback)).json()).reply, /revisar el carné/);
   const medication = { question: '¿Toma medicamentos?' };
-  const firstMedication = await (await app(call(path, medication), env)).json();
+  const firstMedication = await (await app(call(path, medication), fallback)).json();
   const priorMedication = { question: 'Antes', history: [{ ...medication, reply: firstMedication.reply }] };
-  assert.equal((await (await app(call(path, priorMedication), env)).json()).reply,
+  assert.equal((await (await app(call(path, priorMedication), fallback)).json()).reply,
     'No recuerdo si le dieron algún medicamento antes de venir.');
-  assert.deepEqual(await (await app(call(path, { question: '¿Sufre de algo?' }), env)).json(),
+  assert.deepEqual(await (await app(call(path, { question: '¿Sufre de algo?' }), fallback)).json(),
     { mode: 'structured', reply: 'No que yo sepa. ¿Se refiere a alguna enfermedad en particular?' });
   for (const question of ['EPS', '¿A qué E.P.S. está afiliado?', '¿Tiene seguro médico?']) {
-    assert.deepEqual(await (await app(call(path, { question }), env)).json(),
+    assert.deepEqual(await (await app(call(path, { question }), fallback)).json(),
       { mode: 'structured', reply: 'Tendría que revisar los documentos para confirmarle lo de la EPS.' });
   }
   assert.equal(providerCalls, 0);
@@ -379,7 +380,7 @@ test('la entrevista conserva el personaje y descarta respuestas repetidas al cam
   }
   assert.deepEqual(await ask('¿Tiene tos?'), { mode: 'structured', reply: 'Empezó a toser ayer.' });
   assert.deepEqual(await ask('¿Tiene las vacunas al día?'), { mode: 'structured', reply: 'Le faltan algunas vacunas.' });
-  assert.deepEqual(await ask('¿Dónde empezó la erupción?'), { mode: 'structured', reply: history[0].reply });
+  assert.deepEqual(await ask('¿Dónde empezó la erupción?'), { mode: 'ai', reply: history[0].reply });
   response = 'En casa ha estado más irritable.';
   assert.deepEqual(await ask('¿Cómo se ha comportado en casa?'), { mode: 'ai', reply: response });
 });
@@ -689,8 +690,54 @@ test('el historial de la llamada es acotado y solo corresponde a la estación ac
   assert.equal((await app(call(path, { ...next, history: Array(PATIENT_HISTORY_LIMIT).fill(turn) }), env)).status, 200);
   assert.equal(messages.length, 14);
   assert.match(messages[0].content, /"edad":"9 meses"/);
-  assert.match(messages[0].content, /motivo de consulta/);
+  assert.match(messages[0].content, /relatoInicial/);
   assert.ok(!messages[0].content.includes(example[0].rubric.reference));
+});
+
+test('la conversación abierta usa la IA incluso cuando existe una respuesta estructurada', async () => {
+  const data = { ...example[0].data, scenario: 'Paciente simulado de 8 años.', opening: 'Me da miedo hablar.', interactions: [],
+    interview: [{ question: '¿Con quién vives?', reply: 'Vivo con mi mamá y mi papá.' },
+      { question: '¿Con quién no te sientes seguro?', reply: 'Con mi papá. A veces me pega.' }] };
+  const database = { async get(path) {
+    if (path.startsWith('authorized_emails/')) return { data: { active: true } };
+    if (path.startsWith('simulation_sessions/')) return { data: { uid: 'student', index: 0, deadline: Date.now() + 10000 } };
+    return { data: { cases: [{ public: data }] } };
+  } };
+  const app = createHandler({ verify: async () => ({ uid: 'student', email: 'student@example.com' }), database: () => database });
+  let input;
+  let allowAI = true;
+  const env = { AI_ENABLED: 'true', AI: { async run(_model, options) {
+    input = options;
+    return { response: 'Con mi mamá y mi papá. Me cuesta hablar si él está aquí.' };
+  } }, LIMITS: { getByName: () => ({ fetch: async (_url, request) => new Response(null,
+    { status: !allowAI && JSON.parse(request.body).action === 'dialogue' ? 429 : 204 }) }) } };
+  const ask = async (question, history = []) => (await app(call('/circuits/circuit-id/dialogue', { question, history }), env)).json();
+  const question = '¿Con quién vives?';
+  const history = [{ question: '¿Quieres hablar a solas?', reply: 'Sí, así me siento mejor.' }];
+  assert.deepEqual(await ask(question, history), { mode: 'ai', reply: 'Con mi mamá y mi papá. Me cuesta hablar si él está aquí.' });
+  assert.deepEqual(input.messages.slice(1), [{ role: 'user', content: history[0].question },
+    { role: 'assistant', content: history[0].reply }, { role: 'user', content: question }]);
+  assert.match(input.messages[0].content, /"pistaParaResponder":"Vivo con mi mamá y mi papá\."/);
+  assert.match(input.messages[0].content, /improvisar detalles cotidianos/);
+  assert.match(input.messages[0].content, /sin dar por ocurrida una agresión/);
+  allowAI = false;
+  assert.deepEqual(await ask(question, history), { mode: 'structured', reply: 'Vivo con mi mamá y mi papá.' });
+});
+
+test('el listado de paraclínicos incluye informes con resultado y distingue los simulados', () => {
+  const { data } = example[0];
+  const item = { id: 'panel-especial', group: 'paraclinicos', label: 'Panel viral respiratorio', reply: 'Panel negativo.' };
+  const station = { ...data, interactions: [...data.interactions, item] };
+  const options = availableStudyOptions(station);
+  assert.deepEqual(options.find(({ label }) => label === item.label), { id: 'stored:panel-especial', label: item.label, kind: 'case' });
+  assert.deepEqual(requestedStudies(station, `Solicito ${item.label}`).documented, [item]);
+  assert.equal(isStudyListRequest('Ajá, ¿qué paraclínicos hay?'), true);
+  assert.equal(isStudyListRequest('¿Qué resultado dio el hemograma?'), false);
+  for (const option of options) {
+    const report = requestedStudies(station, `Solicito ${option.label}`);
+    if (option.kind === 'case') assert.ok(report.documented.length || report.supplemental.some(({ kind }) => kind === 'case'));
+    else assert.ok(report.supplemental.some(({ kind }) => kind === 'simulated'));
+  }
 });
 
 test('el repaso distingue decisiones incorrectas de criterios omitidos y sirve con notas antiguas', async () => {

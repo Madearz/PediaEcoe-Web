@@ -2,6 +2,8 @@ import type { CaseData, Interaction, StudyResult } from './clinical.mjs';
 export type StudyFinding = { id: string; label: string; reply: string; kind: 'case' | 'simulated' | 'unavailable' };
 export function requestedStudies(data: CaseData, question: string, caseId?: string): { documented: Interaction[]; supplemental: StudyFinding[] } | null;
 export function studySuggestions(data: CaseData, caseId?: string): { id: string; label: string; documented: boolean }[];
+export function availableStudyOptions(data: CaseData, caseId?: string): (Pick<StudyFinding, 'id' | 'label'> & { kind: 'case' | 'simulated' })[];
+export function isStudyListRequest(question: string): boolean;
 export const MISSING_STUDY_VALUE: string;
 export function formatStudyResult(result: StudyResult): string;
 export function displayStoredStudy(data: CaseData, item: Interaction): Interaction;

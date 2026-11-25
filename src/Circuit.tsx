@@ -12,7 +12,7 @@ import { createVoiceCall, type CallPhase, type CallState } from './voice-call';
 import { PHASES, SINGLE, STATION_MS, structured, type CaseData, type Grade, type Group, type Interaction } from '../shared/clinical.mjs';
 import { isVaccinationCardRequest, patientHistoryReply, PATIENT_HISTORY_LIMIT, vaccinationCard } from '../shared/dialogue.mjs';
 import { EXAM_AREAS, examAreas, requestedExam, systemExam, type ExamArea } from '../shared/exam.mjs';
-import { displayStoredStudy, MISSING_STUDY_VALUE, requestedStudies, studySuggestions, type StudyFinding } from '../shared/studies.mjs';
+import { availableStudyOptions, displayStoredStudy, isStudyListRequest, MISSING_STUDY_VALUE, requestedStudies, studySuggestions, type StudyFinding } from '../shared/studies.mjs';
 import { FOLLOW_UP, JUSTIFICATION_LIMIT, registerAnamnesis, type FollowUp } from '../shared/learning.mjs';
 
 type Evolution = { action: string; findings: string[] };
@@ -89,6 +89,8 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
     ...item, areas: examAreas(item.label),
   })), [station.interactions]);
   const suggestedStudies = useMemo(() => studySuggestions(station, caseId), [station, caseId]);
+  const studyOptions = useMemo(() => availableStudyOptions(station, caseId), [station, caseId]);
+  const [studyListOpen, setStudyListOpen] = useState(false);
   const [time, setTime] = useState(() => clockInfo.pausedRemaining ?? Math.max(0, clockInfo.deadline - clockInfo.serverNow));
   const [tab, setTab] = useState(false);
   const [cardOpen, setCardOpen] = useState(false);
@@ -241,6 +243,15 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
   async function requestAnswer(question: string, signal: AbortSignal) {
     signal.throwIfAborted();
     if (!canInteract || submitting.current) throw new Error('La estación no está activa.');
+    if (isStudyListRequest(question)) {
+      setTool('paraclinicos');
+      setStudyListOpen(true);
+      const names = studyOptions.slice(0, 4).map(({ label }) => label).join(', ');
+      const reply = names ? `Puedes consultar ${names}. El panel muestra todos los estudios disponibles.`
+        : 'Esta estación no tiene informes disponibles. Puedes consultar un estudio específico.';
+      addTurn({ question, reply, mode: 'structured', clinical: true });
+      return reply;
+    }
     if (isVaccinationCardRequest(question)) {
       const reply = patientHistoryReply(station, question);
       if (reply) {
@@ -315,6 +326,9 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
     window.speechSynthesis.cancel();
     setError('');
     voiceCall.start();
+  }
+  function requestStudy(label: string) {
+    void requestAnswer(`Solicito ${label}`, new AbortController().signal).catch((failure) => setError(messageOf(failure)));
   }
   const totalSeconds = Math.ceil(time / 1000);
   const clock = [Math.floor(totalSeconds / 60), totalSeconds % 60].map((value) => String(value).padStart(2, '0')).join(':');
@@ -431,13 +445,18 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
           {suggestedStudies.length > 0 && <>
             <p>Ejemplos de paraclínicos</p>
             <div className="option-list">{suggestedStudies.map((study) => <button type="button" key={study.id}
-              className="button secondary" aria-label={`Solicitar ${study.label}`} disabled={saving || !canInteract} onClick={() => {
-                void requestAnswer(`Solicito ${study.label}`, new AbortController().signal)
-                  .catch((failure) => setError(messageOf(failure)));
-              }}>{study.label}
+              className="button secondary" aria-label={`Solicitar ${study.label}`} disabled={saving || !canInteract}
+              onClick={() => requestStudy(study.label)}>{study.label}
               {study.documented && <small className="study-case">Del caso</small>}
             </button>)}</div>
           </>}
+          <button type="button" className="button secondary" aria-expanded={studyListOpen} aria-controls="station-study-list"
+            onClick={() => setStudyListOpen(!studyListOpen)}>{studyListOpen ? 'Ocultar estudios disponibles' : 'Ver estudios disponibles'}</button>
+          {studyListOpen && <div id="station-study-list" className="option-list">
+            {studyOptions.map((study) => <button key={study.id} type="button" className="button secondary" disabled={saving || !canInteract}
+              onClick={() => requestStudy(study.label)}>{study.label}<small className="study-case">{study.kind === 'case' ? 'Del caso' : 'Simulado'}</small></button>)}
+            {!studyOptions.length && <small>No hay informes disponibles en esta estación.</small>}
+          </div>}
           <small>También puedes pedir estudios por su nombre en la conversación.</small>
         </div>}
         <div className="findings"><h3><ClipboardList size={19}/> Hallazgos solicitados</h3>
