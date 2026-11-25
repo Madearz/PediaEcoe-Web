@@ -3,7 +3,7 @@ import { DAILY_CIRCUITS_DEFAULT, DAILY_CIRCUITS_MAX, grade, normalizeEmail, STAT
 import { PATIENT_HISTORY_LIMIT, focusedHistoryReply, isVaccinationCardRequest, patientAge, patientBackgroundReply, patientHistoryReply, patientReplyFits } from '../shared/dialogue.mjs';
 import { reviewFacts, reviewReply } from '../shared/review.mjs';
 import { FOLLOW_UP, JUSTIFICATION_LIMIT } from '../shared/learning.mjs';
-import { formatSimulatedStudy, requestedStudies } from '../shared/studies.mjs';
+import { fallbackStudyValue, formatSimulatedStudy, requestedStudies } from '../shared/studies.mjs';
 import { addDiagnosticChoices, evolutions } from './evolutions.mjs';
 
 const limits = { start: [DAILY_CIRCUITS_DEFAULT, 350], dialogue: [24, 800], messages: [40, 2000] };
@@ -349,16 +349,16 @@ async function simulateStudies(db, env, caller, currentCase, caseId, question, i
     relato: currentCase.opening, observaciones: observations, estudiosGuardados: currentCase.studyResults,
     solicitados: studies.map(({ id, label }) => ({ id, label })) }) }];
   const answer = await modelAnswer(db, env, caller, messages, 420);
-  if (!answer) return { results: [] };
+  let results = [];
   try {
-    const { results } = JSON.parse(answer.reply.replace(/^```(?:json)?\s*|\s*```$/gi, ''));
-    if (!Array.isArray(results)) return { results: [] };
-    return { results: studies.flatMap(({ id }) => {
-      const found = results.find((item) => item?.id === id && typeof item.reply === 'string' && item.reply.trim());
-      const reply = found ? formatSimulatedStudy(id, found.reply) : '';
-      return reply ? [{ id, reply }] : [];
-    }) };
-  } catch { return { results: [] }; }
+    const parsed = answer && JSON.parse(answer.reply.replace(/^```(?:json)?\s*|\s*```$/gi, ''));
+    if (Array.isArray(parsed?.results)) results = parsed.results;
+  } catch { /* Use the available simulated values if the model's report cannot be read. */ }
+  return { results: studies.flatMap(({ id }) => {
+    const found = results.find((item) => item?.id === id && typeof item.reply === 'string' && item.reply.trim());
+    const reply = (found && formatSimulatedStudy(id, found.reply)) || fallbackStudyValue(currentCase, id);
+    return reply ? [{ id, reply }] : [];
+  }) };
 }
 
 function readQuestion(input) {

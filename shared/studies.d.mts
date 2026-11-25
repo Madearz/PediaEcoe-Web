@@ -7,5 +7,6 @@ export function isStudyListRequest(question: string): boolean;
 export const MISSING_STUDY_VALUE: string;
 export function formatStudyResult(result: StudyResult): string;
 export function formatSimulatedStudy(id: string, reply: string): string;
+export function fallbackStudyValue(data: CaseData, id: string): string;
 export function displayStoredStudy(data: CaseData, item: Interaction): Interaction;
 export function stationStudySamples(data: CaseData, caseId?: string): StudyResult[];

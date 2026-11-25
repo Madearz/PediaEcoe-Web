@@ -134,6 +134,15 @@ export function formatSimulatedStudy(id, reply) {
   return values ? `${values}.` : '';
 }
 
+export function fallbackStudyValue(data, id) {
+  if (id !== 'pcr' && id !== 'vsg') return '';
+  const title = normalizeClinicalRequest(data.title);
+  const marked = /\b(?:sepsis|kawasaki|artritis septica|osteomielitis|absceso|neumonia bacteriana|apendicitis)\b/.test(title);
+  const signs = fever.test(studyContext(data, data.interactions.filter(({ group }) => ['anamnesis', 'exploracion'].includes(group))));
+  if (id === 'pcr') return `PCR ${marked ? 48 : signs ? 9 : 2} mg/L.`;
+  return `VSG ${marked ? 36 : signs ? 14 : 8} mm/h.`;
+}
+
 function exampleValue(study, context) {
   if (study.related.some((pattern) => pattern.test(context))) return null;
   if (earlyAgeStudies.has(study.id) && /neonat|recien nacido|\b(?:\d+ (?:dias?|semanas?)|[1-5] meses?)\b/.test(context)) return null;
@@ -327,9 +336,13 @@ export function requestedStudies(data, question, caseId) {
     });
   }
   if (!documented.length && !supplemental.length) {
+    const pathogen = custom && normalizeClinicalRequest(custom.label).match(/^pcr (?:para|de|del) (.+)$/)?.[1];
+    const unrelated = pathogen && !studyContext(data, data.interactions.filter(({ group }) =>
+      ['anamnesis', 'exploracion', 'paraclinicos'].includes(group))).includes(pathogen);
     supplemental.push({ ...(custom ?? { id: 'unknown-study', label: 'Paraclínico solicitado' }),
-      reply: generic ? 'Indica el nombre del estudio. Para una imagen, incluye también la región.'
-        : 'El caso no trae un resultado para este estudio.', kind: 'unavailable', ...(custom ? { canSimulate: true } : {}) });
+      reply: unrelated ? 'No detectado.' : generic ? 'Indica el nombre del estudio. Para una imagen, incluye también la región.'
+        : 'El caso no trae un resultado para este estudio.', kind: unrelated ? 'simulated' : 'unavailable',
+      ...(custom && !unrelated ? { canSimulate: true } : {}) });
   }
   return { documented: documented.map((item) => displayStoredStudy(data, item)), supplemental };
 }

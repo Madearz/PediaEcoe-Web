@@ -770,8 +770,12 @@ test('los paraclínicos nuevos se simulan solo para la estación autenticada y s
   assert.equal(providerCalls, 0);
   assert.deepEqual(await (await app(call(path, body), env)).json(), { results: results.slice(0, 2) });
   assert.equal(providerCalls, 1);
+  assert.deepEqual(await (await app(call(path, body), { ...env, AI_ENABLED: 'false' })).json(), { results: [
+    { id: 'pcr', reply: 'PCR 9 mg/L.' }, { id: 'vsg', reply: 'VSG 14 mm/h.' },
+  ] });
   assert.equal(requestedStudies(data, 'PCR').supplemental[0].id, 'pcr');
   assert.equal(requestedStudies(data, 'Solicito PCR para adenovirus').supplemental[0].id, 'custom:pcr para adenovirus');
+  assert.equal(requestedStudies(data, 'Solicito PCR para adenovirus').supplemental[0].reply, 'No detectado.');
   assert.equal(requestedStudies(data, 'Solicito un eco de cadera').supplemental[0].canSimulate, true);
 });
 
