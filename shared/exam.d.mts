@@ -1,7 +1,11 @@
 import type { CaseData, Interaction } from './clinical.mjs';
-export type ExamArea = 'vitals' | 'respiratory' | 'cardiovascular' | 'abdomen' | 'neurological' | 'skin' | 'ent' | 'musculoskeletal' | 'other';
+export type ExamArea = 'general' | 'vitals' | 'growth' | 'head' | 'ent' | 'respiratory' | 'cardiovascular' | 'abdomen' | 'neurological' | 'skin' | 'musculoskeletal' | 'urinary' | 'other';
+export type ExamReport = { recorded: Interaction[]; supplemental: { id: string; label: string; reply: string; kind: 'simulated' }[] };
 export const EXAM_AREAS: Record<ExamArea, string>;
 export function normalizeClinicalRequest(text: string): string;
 export function examAreas(label: string): ExamArea[];
 export function requestedExam(interactions: Interaction[], question: string): Interaction[] | null;
 export function systemExam(data: CaseData, area: ExamArea): { recorded: Interaction[]; reply: string };
+export function completeExam(data: CaseData, areas?: ExamArea[]): ExamReport;
+export function examRequest(data: CaseData, question: string): (ExamReport & { complete: boolean }) | null;
+export function ageInMonths(data: CaseData): number | null;

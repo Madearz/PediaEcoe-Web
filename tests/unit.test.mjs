@@ -7,7 +7,7 @@ import { createHandler, DailyLimits } from '../worker/index.mjs';
 import { grade, readInvitations, structured, validAnswers, validCase } from '../shared/clinical.mjs';
 import { isVaccinationCardRequest, PATIENT_HISTORY_LIMIT, socialReply, vaccinationCard } from '../shared/dialogue.mjs';
 import { caseGroups } from '../shared/case-groups.mjs';
-import { examAreas, requestedExam, systemExam } from '../shared/exam.mjs';
+import { completeExam, EXAM_AREAS, examAreas, examRequest, requestedExam, systemExam } from '../shared/exam.mjs';
 import { practiceFocus, registerAnamnesis } from '../shared/learning.mjs';
 import { addDiagnosticChoices } from '../worker/evolutions.mjs';
 import { withPracticeDecisions } from '../worker/decision-cases.mjs';
@@ -61,7 +61,44 @@ test('la exploración completa conserva los hallazgos y solo simula sistemas sin
   const data = { title: 'Tos', scenario: 'Paciente de 8 años', opening: 'Tiene tos.', interactions: [recorded] };
   assert.deepEqual(systemExam(data, 'respiratory').recorded, [recorded]);
   assert.match(systemExam(data, 'abdomen').reply, /Abdomen blando/);
-  assert.equal(systemExam({ ...data, interactions: [] }, 'respiratory').reply, '');
+  assert.match(systemExam({ ...data, interactions: [] }, 'respiratory').reply, /por precisar/);
+  assert.doesNotMatch(systemExam(data, 'respiratory').reply, /sin ruidos agregados/);
+});
+
+test('el examen por voz y por panel recorre todos los sistemas y conserva los datos parciales', () => {
+  const recorded = { id: 'resp', group: 'exploracion', label: 'Signos vitales y respiración', reply: 'Saturación de oxígeno 94 %. Sibilancias bilaterales.' };
+  const data = { title: 'Tos', scenario: 'Paciente de 7 años.', opening: 'Tiene tos.', interactions: [recorded] };
+  const report = completeExam(data);
+  assert.deepEqual(report.recorded, [recorded]);
+  for (const section of Object.keys(EXAM_AREAS)) {
+    const item = systemExam(data, section);
+    assert.ok(item.recorded.length || item.reply, section);
+  }
+  const all = examRequest(data, 'Ajá, examen físico completo, por favor');
+  assert.equal(all.complete, true);
+  assert.deepEqual(all.recorded, report.recorded);
+  assert.deepEqual(all.supplemental, report.supplemental);
+  assert.deepEqual(examRequest(data, '¿Cuál es la SpO₂?').recorded, [recorded]);
+  assert.doesNotMatch(systemExam(data, 'vitals').reply, /98 %/);
+  assert.match(examRequest(data, '¿Cómo están los ganglios?').supplemental[0].label, /ganglios/);
+  assert.equal(examRequest(data, '¿Desde cuándo tose?'), null);
+  assert.equal(examRequest(data, '¿Puedo auscultarlo?'), null);
+  const baby = { ...data, scenario: 'Paciente de 2 meses.', interactions: [] };
+  assert.match(systemExam(baby, 'vitals').reply, /FC 140\/min/);
+});
+
+test('espirometría usa datos del caso, permite practicar en asma estable y se difiere en crisis grave', () => {
+  const baseline = { title: 'Asma', category: 'Respiratorio', scenario: 'Paciente de 8 años.', opening: 'La tos aparece y desaparece.', interactions: [] };
+  const stable = requestedStudies(baseline, 'Espirometría con broncodilatación');
+  assert.match(stable.supplemental[0].reply, /FEV₁ 68 %.*FEV₁ 84 %/);
+  assert.equal(stable.supplemental[0].kind, 'simulated');
+  assert.ok(availableStudyOptions(baseline).some(({ label }) => label === 'Espirometría'));
+  assert.ok(studySuggestions(baseline).some(({ label }) => label === 'Espirometría'));
+  const severe = requestedStudies({ ...baseline, title: 'Asma con pecho silente' }, 'Pido espirometría');
+  assert.match(severe.supplemental[0].reply, /diferida hasta la estabilización/);
+  assert.equal(severe.supplemental[0].canSimulate, undefined);
+  const recorded = { id: 'spiro', group: 'paraclinicos', label: 'Espirometría', reply: 'FEV₁ 87 % del predicho.' };
+  assert.deepEqual(requestedStudies({ ...baseline, interactions: [recorded] }, 'Espirometría').documented, [recorded]);
 });
 
 test('la rúbrica separa diagnóstico principal y diferenciales sin cambiar los 100 puntos', () => {

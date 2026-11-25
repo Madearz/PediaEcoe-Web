@@ -11,7 +11,7 @@ import { canListen, canSpeak, listenForQuestion, playSpeech, speak, useVoice } f
 import { createVoiceCall, type CallPhase, type CallState } from './voice-call';
 import { PHASES, SINGLE, STATION_MS, structured, type CaseData, type Grade, type Group, type Interaction } from '../shared/clinical.mjs';
 import { isVaccinationCardRequest, patientHistoryReply, PATIENT_HISTORY_LIMIT, vaccinationCard } from '../shared/dialogue.mjs';
-import { EXAM_AREAS, examAreas, requestedExam, systemExam, type ExamArea } from '../shared/exam.mjs';
+import { completeExam, EXAM_AREAS, examAreas, examRequest, systemExam, type ExamArea, type ExamReport } from '../shared/exam.mjs';
 import { availableStudyOptions, displayStoredStudy, isStudyListRequest, MISSING_STUDY_VALUE, requestedStudies, studySuggestions, type StudyFinding } from '../shared/studies.mjs';
 import { FOLLOW_UP, JUSTIFICATION_LIMIT, registerAnamnesis, type FollowUp } from '../shared/learning.mjs';
 import { type ReasoningNote, type TreatmentPlan } from '../shared/decisions.mjs';
@@ -34,6 +34,7 @@ const callLabels: Record<CallPhase, string> = {
 const labels: Record<Group, string> = { anamnesis: 'Preguntas de anamnesis', exploracion: 'Exploración física',
   paraclinicos: 'Paraclínicos', razonamiento: 'Decisión diagnóstica', acciones: 'Conducta inicial', cierre: 'Comunicación y cierre' };
 const examIcons: Record<ExamArea, LucideIcon> = {
+  general: Stethoscope, growth: Activity, head: Eye, urinary: Droplets,
   vitals: Activity, respiratory: Wind, cardiovascular: HeartPulse, abdomen: Droplets, neurological: Brain,
   skin: Eye, ent: Ear, musculoskeletal: Bone, other: Stethoscope,
 };
@@ -95,6 +96,7 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
   const [phase, setPhase] = useState(0);
   const [tool, setTool] = useState<Group>('exploracion');
   const [examArea, setExamArea] = useState<ExamArea | 'all'>('all');
+  const [fullExamOpen, setFullExamOpen] = useState(false);
   const [latestFinding, setLatestFinding] = useState('');
   const [supplemental, setSupplemental] = useState<SupplementalFinding[]>(() => {
     try {
@@ -104,7 +106,7 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
     } catch { return []; }
   });
   const examOptions = useMemo(() => station.interactions.filter((item) => item.group === 'exploracion').map((item) => ({
-    ...item, areas: examAreas(item.label),
+    ...item, areas: examAreas(item.label + ' ' + item.reply),
   })), [station.interactions]);
   const suggestedStudies = useMemo(() => studySuggestions(station, caseId), [station, caseId]);
   const studyOptions = useMemo(() => availableStudyOptions(station, caseId), [station, caseId]);
@@ -221,20 +223,14 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
     addTurn({ question: item.label, reply: item.reply, mode: 'structured' });
     if (audio && !callActive && !voice.listening) speak(item.reply);
   }
-  function chooseSystem(area: ExamArea) {
+  function revealExam(result: ExamReport, area: ExamArea | 'all', full = false) {
     if (!canInteract || submitting.current) return;
-    const result = systemExam(station, area);
     setExamArea(area);
-    if (result.recorded.length) {
-      recordSelections(result.recorded.map(({ id }) => id));
-      setLatestFinding(result.recorded.at(-1)!.id);
-      return;
-    }
-    const finding: SupplementalFinding = { id: 'system:' + area, group: 'exploracion', label: EXAM_AREAS[area],
-      reply: result.reply || 'Este caso no incluye un hallazgo de este sistema.',
-      kind: result.reply ? 'simulated' : 'unavailable' };
-    setSupplemental((previous) => [finding, ...previous.filter((item) => item.id !== finding.id)]);
-    setLatestFinding(finding.id);
+    setFullExamOpen(full);
+    if (result.recorded.length) recordSelections(result.recorded.map(({ id }) => id));
+    const entries = result.supplemental.map((item) => ({ ...item, group: 'exploracion' as const }));
+    if (entries.length) setSupplemental((previous) => [...entries, ...previous.filter((item) => !entries.some(({ id }) => item.id === id))]);
+    setLatestFinding(entries[0]?.id ?? result.recorded[0]?.id ?? '');
   }
   async function revealEvolution(action: string) {
     if (!canInteract || saving || evolving || evolution) return;
@@ -283,13 +279,20 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
       }
     }
     const studies = requestedStudies(station, question, caseId);
-    const exam = requestedExam(station.interactions, question);
+    const exam = examRequest(station, question);
+    if (exam?.complete && !studies) {
+      setTool('exploracion');
+      revealExam(exam, 'all', true);
+      const reply = 'El examen físico completo está disponible por sistemas en el panel de Exploración física.';
+      addTurn({ question, reply, mode: 'structured', clinical: true });
+      return reply;
+    }
     if (studies || exam) {
       if (time <= 0 || submitting.current) throw new Error('La estación ya terminó.');
-      const documented = [...(exam ?? []), ...(studies?.documented ?? [])];
-      const extra: SupplementalFinding[] = (studies?.supplemental ?? []).map((item) => ({
-        ...item, id: 'study:' + item.id, group: 'paraclinicos',
-      }));
+      const documented = [...(exam?.recorded ?? []), ...(studies?.documented ?? [])];
+      const extra: SupplementalFinding[] = [...(exam?.supplemental ?? []).map((item) => ({ ...item, group: 'exploracion' as const })), ...(studies?.supplemental ?? []).map((item) => ({
+        ...item, id: 'study:' + item.id, group: 'paraclinicos' as const,
+      }))];
       const missing = extra.filter(({ id, canSimulate }) => canSimulate
         && !supplemental.some((item) => item.id === id && item.kind === 'simulated')).slice(0, 6);
       let generated: { id: string; reply: string }[] = [];
@@ -309,9 +312,9 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
         if (cached || report) { item.reply = (cached ?? report)!.reply; item.kind = 'simulated'; }
         else item.reply = 'No se pudo generar el informe ahora. Puedes solicitarlo de nuevo.';
       }
-      if (exam && !exam.length && !studies) {
+      if (exam && !documented.length && !extra.length && !studies) {
         extra.push({ id: 'exam:unavailable', group: 'exploracion', label: 'Exploración solicitada',
-          reply: 'No hay un hallazgo registrado para esa solicitud. Puedes pedir otra exploración disponible en el caso.', kind: 'unavailable' });
+          reply: 'Puedes consultar un sistema concreto o pedir el examen físico completo.', kind: 'unavailable' });
       }
       if (documented.length) recordSelections(documented.map((item) => item.id));
       if (extra.length) {
@@ -322,6 +325,7 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
       setLatestFinding(extra.at(-1)?.id ?? documented.at(-1)?.id ?? '');
       setTool(studies ? 'paraclinicos' : 'exploracion');
       setExamArea('all');
+      if (exam) setFullExamOpen(exam.complete);
       const reply = [
         ...documented.map((item) => `${item.label}. ${item.reply}`),
         ...extra.map((item) => `${item.label}. ${item.kind === 'simulated' ? 'Resultado simulado. ' : ''}${item.reply}`),
@@ -487,11 +491,12 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
           <button key={key} className={key === tool ? 'active' : ''} aria-pressed={key === tool} onClick={() => setTool(key)}>
             {key === 'acciones' ? 'Acciones' : labels[key]}</button>)}</div>
         {tool === 'exploracion' && <div className="exam-areas" role="group" aria-label="Sistemas del examen físico">
-          <button type="button" aria-pressed={examArea === 'all'} onClick={() => setExamArea('all')}>Todos</button>
-          {availableAreas.map((area) => <button type="button" key={area} aria-pressed={examArea === area} disabled={!canInteract || saving}
-            onClick={() => chooseSystem(area)}>{EXAM_AREAS[area]}</button>)}
+          <button type="button" aria-pressed={fullExamOpen} disabled={!canInteract || saving}
+            onClick={() => fullExamOpen ? setFullExamOpen(false) : revealExam(completeExam(station), 'all', true)}>Examen completo</button>
+          {availableAreas.map((area) => <button type="button" key={area} aria-pressed={!fullExamOpen && examArea === area} disabled={!canInteract || saving}
+            onClick={() => revealExam(completeExam(station, [area]), area)}>{EXAM_AREAS[area]}</button>)}
         </div>}
-        <div className="tool-buttons">{toolOptions.map((item) => {
+        {!(tool === 'exploracion' && fullExamOpen) && <div className="tool-buttons">{toolOptions.map((item) => {
           const area = examArea === 'all' ? item.areas[0] : examArea;
           const ToolIcon = tool === 'paraclinicos' ? ClipboardList : tool === 'acciones' ? HeartPulse : examIcons[area ?? 'other'];
           const requested = selected.includes(item.id);
@@ -501,7 +506,7 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
           </button>;
         })}
           {!toolOptions.length && (tool === 'acciones' || (tool === 'exploracion' && examArea === 'all')) &&
-            <p>Selecciona un sistema para consultar sus hallazgos.</p>}</div>
+            <p>Selecciona un sistema para consultar sus hallazgos.</p>}</div>}
         {tool === 'paraclinicos' && <div className="study-suggestions">
           {suggestedStudies.length > 0 && <>
             <p>Ejemplos de paraclínicos</p>
@@ -525,13 +530,21 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
           </form>
           <small>También puedes pedir estudios por su nombre en la conversación.</small>
         </div>}
-        <div className="findings"><h3><ClipboardList size={19}/> Hallazgos solicitados</h3>
+        {tool === 'exploracion' && fullExamOpen ? <div className="findings"><h3><ClipboardList size={19}/> Examen físico completo</h3>
+          <ul className="findings-list">{availableAreas.map((area) => {
+            const section = systemExam(station, area);
+            return <li key={area}><strong>{EXAM_AREAS[area]}</strong>
+              {section.recorded.map((item) => <p key={item.id}>{item.reply}</p>)}
+              {section.reply && <><small>Complemento simulado</small><p>{section.reply}</p></>}
+            </li>;
+          })}</ul>
+        </div> : <div className="findings"><h3><ClipboardList size={19}/> Hallazgos solicitados</h3>
           <span className="sr-only" role="status">{latestFinding && findings.find((item) => item.id === latestFinding)?.reply}</span>
           {findings.length ? <ul className="findings-list">{findings.map((item) => <li key={item.id} className={item.id === latestFinding ? 'latest' : ''}>
             <small>{item.kind === 'simulated' ? 'Resultado simulado' : item.kind === 'unavailable' ? 'Sin resultado' : labels[item.group]}</small>
             <strong>{item.label}</strong><p>{item.reply}</p>
           </li>)}</ul> : <p>Solicita una exploración o un paraclínico para ver su resultado aquí.</p>}
-        </div>
+        </div>}
       </aside>
     </div>
     <section className="card station-options"><h2><Brain size={21}/> {phase === 2 ? 'Diagnóstico principal' : labels[centralGroup]}</h2><p>{phase === 0 ? station.scenario : 'Selecciona y registra tus decisiones durante la estación.'}</p>

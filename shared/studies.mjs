@@ -1,4 +1,4 @@
-import { normalizeClinicalRequest } from './exam.mjs';
+import { ageInMonths, normalizeClinicalRequest } from './exam.mjs';
 import { measuredExample } from './study-measurements.mjs';
 
 const renal = /renal|nefro|diuresis|urinari|orina|hematuria|oliguria|enuresis|deshidrat|edema/;
@@ -59,6 +59,8 @@ const studies = [
     related: [digestive, /parasito|heces|giardia|ameb|uncinaria/], normal: 'Sin huevos, quistes ni parásitos en la muestra simulada.' },
   { id: 'pcr', label: 'Proteína C reactiva', aliases: /(?:proteina c reactiva|pcr(?: cuantitativa| inflamatoria)?)/,
     related: [fever, chest, /artritis|apendic|inflam|vasculit/], normal: 'Proteína C reactiva 2 mg/L.' },
+  { id: 'espirometria', label: 'Espirometría', aliases: /(?:espirometria(?: con (?:prueba (?:de )?)?broncodilata(?:dor|cion))?|pruebas? de funcion pulmonar|fev ?1|vef ?1|vems|cvf|fvc)/,
+    related: [chest], normal: null },
   { id: 'vsg', label: 'Velocidad de sedimentación globular', aliases: /(?:velocidad de sedimentacion(?: globular)?|vsg|eritrosedimentacion)/,
     related: [fever, /artritis|inflam|vasculit/], normal: 'VSG 8 mm/h.' },
   { id: 'hemocultivo', label: 'Hemocultivo', aliases: /(?:hemocultivos?|cultivo de sangre)/, related: [fever], normal: null },
@@ -221,6 +223,20 @@ function examReport(study, data) {
   }
 }
 
+function spirometryExample(data) {
+  const context = studyContext(data, data.interactions.filter(({ group }) => ['anamnesis', 'exploracion'].includes(group)));
+  if (/pecho silente|apenas entra aire|palabras sueltas|(?:crisis|exacerbacion|dificultad respiratoria) (?:grave|severa)|insuficiencia respiratoria|apnea|hipoxemia|bronquiolitis/.test(context)) {
+    return { reply: 'Prueba diferida hasta la estabilización respiratoria y la reevaluación clínica.', kind: 'unavailable' };
+  }
+  const age = ageInMonths(data);
+  if (age === null || age < 72) return { reply: 'No se dispone de una maniobra reproducible en esta estación. Valorar la prueba según la edad y la colaboración.', kind: 'unavailable' };
+  if (/asma/.test(context) && !/estabilidad sostenida|sin tiraje|mantiene mejoria|mejoria en observacion|tras exacerbacion/.test(context)) {
+    // Example of variable expiratory airflow in a cooperative school-age child, based on the GINA 2025 criteria.
+    return { reply: 'Prebroncodilatador: FEV₁ 68 % del predicho, FEV₁/CVF 0,68. Posbroncodilatador: FEV₁ 84 % del predicho, FEV₁/CVF 0,80.', kind: 'simulated' };
+  }
+  return { reply: 'Prebroncodilatador: FEV₁ 92 % del predicho, FEV₁/CVF 0,84. Posbroncodilatador: FEV₁ 95 % del predicho, FEV₁/CVF 0,85.', kind: 'simulated' };
+}
+
 export function isStudyListRequest(question) {
   const text = normalizeClinicalRequest(question);
   return /\b(?:que|cuales) (?:son )?(?:los )?(?:paraclinicos|estudios|examenes de laboratorio) (?:hay|estan disponibles|tienen disponibles|puedo (?:solicitar|pedir|consultar))\b/.test(text)
@@ -246,8 +262,10 @@ export function studySuggestions(data, caseId) {
   const quantified = available.filter((item) => !['hemoglobina', 'vcm'].includes(item.id)
     && measuredExample(item.id, examReport(item, data), fullContext));
   const related = available.filter((item) => item.related.some((pattern) => pattern.test(clinicalContext)));
+  const asthmaStudy = /\basma\b/.test(clinicalContext) && spirometryExample(data).kind === 'simulated'
+    ? available.filter(({ id }) => id === 'espirometria') : [];
   const examples = reported.length || quantified.length || existing.length || edited.length ? [] : available.filter((item) => exampleValue(item, fullContext)).slice(0, 1);
-  const suggestions = [...new Set([...reported, ...quantified, ...related.slice(0, examples.length ? 2 : 3), ...examples, ...related])]
+  const suggestions = [...new Set([...reported, ...asthmaStudy, ...quantified, ...related.slice(0, examples.length ? 2 : 3), ...examples, ...related])]
     .slice(0, 3).map(({ id, label }) => ({ id, label, documented: reported.some((item) => item.id === id) }));
   return [...edited.map(({ id, label }) => ({ id: 'edited:' + id, label, documented: true })), ...suggestions];
 }
@@ -322,6 +340,10 @@ export function requestedStudies(data, question, caseId) {
   for (const study of requested) {
     if (stored.some((label) => matchesStudy(study, label))) continue;
     const caseResult = results[study.id] ?? examReport(study, data);
+    if (study.id === 'espirometria' && !caseResult) {
+      supplemental.push({ id: study.id, label: study.label, ...spirometryExample(data) });
+      continue;
+    }
     const numeric = numericStudies.has(study.id);
     const report = numeric && caseResult ? rawStudyMeasurements(caseResult) || MISSING_STUDY_VALUE : caseResult;
     const filled = report === MISSING_STUDY_VALUE ? measuredExample(study.id, caseResult, context) : '';
