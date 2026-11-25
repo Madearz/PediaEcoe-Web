@@ -84,13 +84,20 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
   const [tool, setTool] = useState<Group>('exploracion');
   const [examArea, setExamArea] = useState<ExamArea | 'all'>('all');
   const [latestFinding, setLatestFinding] = useState('');
-  const [supplemental, setSupplemental] = useState<SupplementalFinding[]>([]);
+  const [supplemental, setSupplemental] = useState<SupplementalFinding[]>(() => {
+    try {
+      const saved: SupplementalFinding[] = JSON.parse(readDraft('studies'));
+      return Array.isArray(saved) ? saved.filter((item) => item?.group === 'paraclinicos' && item.kind === 'simulated'
+        && typeof item.id === 'string' && typeof item.label === 'string' && typeof item.reply === 'string') : [];
+    } catch { return []; }
+  });
   const examOptions = useMemo(() => station.interactions.filter((item) => item.group === 'exploracion').map((item) => ({
     ...item, areas: examAreas(item.label),
   })), [station.interactions]);
   const suggestedStudies = useMemo(() => studySuggestions(station, caseId), [station, caseId]);
   const studyOptions = useMemo(() => availableStudyOptions(station, caseId), [station, caseId]);
   const [studyListOpen, setStudyListOpen] = useState(false);
+  const [customStudy, setCustomStudy] = useState('');
   const [time, setTime] = useState(() => clockInfo.pausedRemaining ?? Math.max(0, clockInfo.deadline - clockInfo.serverNow));
   const [tab, setTab] = useState(false);
   const [cardOpen, setCardOpen] = useState(false);
@@ -142,7 +149,7 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
       });
       try {
         sessionStorage.removeItem(storageKey);
-        for (const key of ['justification', 'followup', 'differentials', 'anamnesis']) sessionStorage.removeItem(storageKey + ':' + key);
+        for (const key of ['justification', 'followup', 'differentials', 'anamnesis', 'studies']) sessionStorage.removeItem(storageKey + ':' + key);
       } catch { /* Storage may be disabled. */ }
       onSaved(resultId);
     } catch (failure) { setError(messageOf(failure)); }
@@ -269,12 +276,35 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
       const extra: SupplementalFinding[] = (studies?.supplemental ?? []).map((item) => ({
         ...item, id: 'study:' + item.id, group: 'paraclinicos',
       }));
+      const missing = extra.filter(({ id, canSimulate }) => canSimulate
+        && !supplemental.some((item) => item.id === id && item.kind === 'simulated')).slice(0, 6);
+      let generated: { id: string; reply: string }[] = [];
+      if (missing.length && apiReady) {
+        try {
+          ({ results: generated } = await call<{ results: { id: string; reply: string }[] }>(user,
+            `/circuits/${session.id}/studies`, { question, index: session.index, ids: missing.map(({ id }) => id.slice(6)) }, signal));
+        } catch (failure) {
+          signal.throwIfAborted();
+          if (failure instanceof RequestError && [401, 403, 409].includes(failure.status)) throw failure;
+        }
+      }
+      signal.throwIfAborted();
+      for (const item of extra.filter(({ canSimulate }) => canSimulate)) {
+        const cached = supplemental.find(({ id, kind }) => id === item.id && kind === 'simulated');
+        const report = generated.find(({ id }) => 'study:' + id === item.id);
+        if (cached || report) { item.reply = (cached ?? report)!.reply; item.kind = 'simulated'; }
+        else item.reply = 'No se pudo generar el informe ahora. Puedes solicitarlo de nuevo.';
+      }
       if (exam && !exam.length && !studies) {
         extra.push({ id: 'exam:unavailable', group: 'exploracion', label: 'Exploración solicitada',
           reply: 'No hay un hallazgo registrado para esa solicitud. Puedes pedir otra exploración disponible en el caso.', kind: 'unavailable' });
       }
       if (documented.length) recordSelections(documented.map((item) => item.id));
-      if (extra.length) setSupplemental((current) => [...extra, ...current.filter((item) => !extra.some(({ id }) => id === item.id))]);
+      if (extra.length) {
+        const merged = [...extra, ...supplemental.filter((item) => !extra.some(({ id }) => id === item.id))];
+        setSupplemental(merged);
+        saveDraft('studies', JSON.stringify(merged.filter(({ group, kind }) => group === 'paraclinicos' && kind === 'simulated').slice(0, 50)));
+      }
       setLatestFinding(extra.at(-1)?.id ?? documented.at(-1)?.id ?? '');
       setTool(studies ? 'paraclinicos' : 'exploracion');
       setExamArea('all');
@@ -327,8 +357,23 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
     setError('');
     voiceCall.start();
   }
-  function requestStudy(label: string) {
-    void requestAnswer(`Solicito ${label}`, new AbortController().signal).catch((failure) => setError(messageOf(failure)));
+  async function requestStudy(label: string, custom = false) {
+    if (textRequest.current || saving || callActive || !canInteract) return;
+    let question = `Solicito ${label}`;
+    if (custom && !requestedStudies(station, question, caseId)) question = `Solicito prueba de ${label}`;
+    const request = new AbortController();
+    textRequest.current = request;
+    setSending(true);
+    setError('');
+    try {
+      const reply = await requestAnswer(question, request.signal);
+      if (custom) setCustomStudy('');
+      if (audio) speak(reply);
+    } catch (failure) {
+      if (!request.signal.aborted) setError(messageOf(failure));
+    } finally {
+      if (textRequest.current === request) { textRequest.current = null; setSending(false); }
+    }
   }
   const totalSeconds = Math.ceil(time / 1000);
   const clock = [Math.floor(totalSeconds / 60), totalSeconds % 60].map((value) => String(value).padStart(2, '0')).join(':');
@@ -445,18 +490,23 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
           {suggestedStudies.length > 0 && <>
             <p>Ejemplos de paraclínicos</p>
             <div className="option-list">{suggestedStudies.map((study) => <button type="button" key={study.id}
-              className="button secondary" aria-label={`Solicitar ${study.label}`} disabled={saving || !canInteract}
-              onClick={() => requestStudy(study.label)}>{study.label}
+              className="button secondary" aria-label={`Solicitar ${study.label}`} disabled={saving || sending || callActive || !canInteract}
+              onClick={() => void requestStudy(study.label)}>{study.label}
               {study.documented && <small className="study-case">Del caso</small>}
             </button>)}</div>
           </>}
           <button type="button" className="button secondary" aria-expanded={studyListOpen} aria-controls="station-study-list"
             onClick={() => setStudyListOpen(!studyListOpen)}>{studyListOpen ? 'Ocultar estudios disponibles' : 'Ver estudios disponibles'}</button>
           {studyListOpen && <div id="station-study-list" className="option-list">
-            {studyOptions.map((study) => <button key={study.id} type="button" className="button secondary" disabled={saving || !canInteract}
-              onClick={() => requestStudy(study.label)}>{study.label}<small className="study-case">{study.kind === 'case' ? 'Del caso' : 'Simulado'}</small></button>)}
+            {studyOptions.map((study) => <button key={study.id} type="button" className="button secondary" disabled={saving || sending || callActive || !canInteract}
+              onClick={() => void requestStudy(study.label)}>{study.label}<small className="study-case">{study.kind === 'case' ? 'Del caso' : study.kind === 'simulated' ? 'Simulado' : 'Por solicitar'}</small></button>)}
             {!studyOptions.length && <small>No hay informes disponibles en esta estación.</small>}
           </div>}
+          <form className="ask" onSubmit={(event) => { event.preventDefault(); if (customStudy.trim()) void requestStudy(customStudy.trim(), true); }}>
+            <input aria-label="Otro paraclínico" maxLength={120} placeholder="Otro estudio, p. ej. ecografía de cadera"
+              value={customStudy} disabled={!canInteract} onChange={(event) => setCustomStudy(event.target.value)}/>
+            <button type="submit" className="button secondary" disabled={saving || sending || callActive || !canInteract || !customStudy.trim()}>Solicitar</button>
+          </form>
           <small>También puedes pedir estudios por su nombre en la conversación.</small>
         </div>}
         <div className="findings"><h3><ClipboardList size={19}/> Hallazgos solicitados</h3>

@@ -1,10 +1,11 @@
 import type { CaseData, Interaction, StudyResult } from './clinical.mjs';
-export type StudyFinding = { id: string; label: string; reply: string; kind: 'case' | 'simulated' | 'unavailable' };
+export type StudyFinding = { id: string; label: string; reply: string; kind: 'case' | 'simulated' | 'unavailable'; canSimulate?: boolean };
 export function requestedStudies(data: CaseData, question: string, caseId?: string): { documented: Interaction[]; supplemental: StudyFinding[] } | null;
 export function studySuggestions(data: CaseData, caseId?: string): { id: string; label: string; documented: boolean }[];
-export function availableStudyOptions(data: CaseData, caseId?: string): (Pick<StudyFinding, 'id' | 'label'> & { kind: 'case' | 'simulated' })[];
+export function availableStudyOptions(data: CaseData, caseId?: string): (Pick<StudyFinding, 'id' | 'label'> & { kind: 'case' | 'simulated' | 'request' })[];
 export function isStudyListRequest(question: string): boolean;
 export const MISSING_STUDY_VALUE: string;
 export function formatStudyResult(result: StudyResult): string;
+export function formatSimulatedStudy(id: string, reply: string): string;
 export function displayStoredStudy(data: CaseData, item: Interaction): Interaction;
 export function stationStudySamples(data: CaseData, caseId?: string): StudyResult[];

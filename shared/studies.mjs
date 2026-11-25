@@ -57,8 +57,16 @@ const studies = [
     related: [renal, /lupus|inmun|complemento/], normal: 'Complemento C3 105 mg/dL.' },
   { id: 'heces', label: 'Estudio de heces', aliases: /(?:coproparasitari[oa]|coproscopico|coprologico|(?:estudio|prueba|analisis) de heces|examen de heces)/,
     related: [digestive, /parasito|heces|giardia|ameb|uncinaria/], normal: 'Sin huevos, quistes ni parásitos en la muestra simulada.' },
-  { id: 'pcr', label: 'Proteína C reactiva', aliases: /(?:proteina c reactiva|pcr cuantitativa|pcr inflamatoria)/,
+  { id: 'pcr', label: 'Proteína C reactiva', aliases: /(?:proteina c reactiva|pcr(?: cuantitativa| inflamatoria)?)/,
     related: [fever, chest, /artritis|apendic|inflam|vasculit/], normal: 'Proteína C reactiva 2 mg/L.' },
+  { id: 'vsg', label: 'Velocidad de sedimentación globular', aliases: /(?:velocidad de sedimentacion(?: globular)?|vsg|eritrosedimentacion)/,
+    related: [fever, /artritis|inflam|vasculit/], normal: 'VSG 8 mm/h.' },
+  { id: 'hemocultivo', label: 'Hemocultivo', aliases: /(?:hemocultivos?|cultivo de sangre)/, related: [fever], normal: null },
+  { id: 'procalcitonina', label: 'Procalcitonina', aliases: /procalcitonina/, related: [fever], normal: 'Procalcitonina 0,04 ng/mL.' },
+  { id: 'lactato', label: 'Lactato', aliases: /(?:lactato|acido lactico)/, related: [/choque|sepsis|hipoperfusion|deshidrat/], normal: 'Lactato 1,2 mmol/L.' },
+  { id: 'urea', label: 'Urea', aliases: /(?:urea|bun|nitrogeno ureico)/, related: [renal], normal: null },
+  { id: 'lipasa', label: 'Lipasa', aliases: /lipasa/, related: [digestive], normal: 'Lipasa 28 U/L.' },
+  { id: 'coprocultivo', label: 'Coprocultivo', aliases: /(?:coprocultivo|cultivo de heces)/, related: [digestive, fever], normal: null },
   { id: 'ecg', label: 'Electrocardiograma', aliases: /(?:ecg|ekg|electrocardiograma)/,
     related: [chest, electrolytes, /sincop|arritmia|palpitacion|taquicardia|choque|dolor torac|intoxic/],
     normal: 'Ritmo sinusal.' },
@@ -71,15 +79,18 @@ const studies = [
     normal: 'Sin líquido libre ni colecciones en el informe simulado.' },
   { id: 'eco-renal', label: 'Ecografía renal', aliases: /(?:ecografia renal|ultrasonido renal|(?:eco|ecografia|ultrasonido) de rinones)/,
     related: [renal, /masa|dilatacion del sistema colector/], normal: 'Riñones sin dilatación del sistema colector en el informe simulado.' },
-  { id: 'ecografia', label: 'Ecografía', aliases: /(?:ecografia|ultrasonido)/, related: [], normal: null },
+  { id: 'eco-cardiaco', label: 'Ecocardiograma', aliases: /(?:ecocardiogra\w*|(?:eco|ecografia|ultrasonido) (?:cardiac[oa]|(?:del |de )?corazon))/, related: [chest], normal: null },
+  { id: 'eco-pelvico', label: 'Ecografía pélvica', aliases: /(?:ecografia pelvica|(?:eco|ecografia|ultrasonido) (?:de )?pelvis|eco pelvico)/, related: [digestive], normal: null },
+  { id: 'ecografia', label: 'Ecografía', aliases: /(?:eco|ecografia|ultrasonido)/, related: [], normal: null },
   { id: 'radiografia', label: 'Radiografía', aliases: /(?:radiografia|rx)/, related: [], normal: null },
   { id: 'lcr', label: 'Análisis de líquido cefalorraquídeo', aliases: /(?:(?:analisis de )?liquido cefalorraquideo|lcr)/,
     related: [neurological, fever], normal: null },
   { id: 'neuroimagen', label: 'Neuroimagen', aliases: /(?:neuroimagen|tomografia craneal|tac craneal|tomografia de craneo|resonancia cerebral)/,
     related: [neurological], normal: null },
+  { id: 'eeg', label: 'Electroencefalograma', aliases: /(?:eeg|electroencefalogra\w*)/, related: [neurological], normal: null },
 ];
 
-const studyRequest = /\b(solicit\w*|pedir|pido|ordeno|ordenar|quisiera|quiero|dame|muestr\w*|resultados?|paraclinic[oa]s?|realiz\w*|me (?:da|dice|indica)|tom\w*|mido|hacer|como (?:esta|salio)|cual (?:es|fue)|cuales (?:son|fueron)|cuanto (?:tiene|mide|dio|salio|es|esta)|cuanta hemoglobina|(?:nivel|valor) de|esta (?:baj[oa]|alt[oa]|normal))\b/;
+const studyRequest = /\b(solicit\w*|pedir|pido|ordeno|ordenar|quisiera|quiero|dame|hazme|muestr\w*|resultados?|paraclinic[oa]s?|realiz\w*|me (?:da|dice|indica)|tom\w*|mido|hacer|como (?:esta|salio)|cual (?:es|fue)|cuales (?:son|fueron)|cuanto (?:tiene|mide|dio|salio|es|esta)|cuanta hemoglobina|(?:nivel|valor) de|esta (?:baj[oa]|alt[oa]|normal))\b/;
 
 // Datos ficticios de esta estación. El caso original registra microcitosis persistente.
 const ironFollowUp = {
@@ -91,10 +102,10 @@ const ironFollowUp = {
 
 const numericStudies = new Set(['hemograma', 'hemoglobina', 'vcm', 'ferritina', 'hematocrito', 'plaquetas', 'reticulocitos',
   'glucosa', 'cetonas', 'sodio', 'potasio', 'electrolitos', 'creatinina', 'hepatica', 'bilirrubina', 'albumina',
-  'coagulacion', 'gasometria', 'complemento', 'pcr']);
+  'coagulacion', 'gasometria', 'complemento', 'pcr', 'vsg', 'procalcitonina', 'lactato', 'urea', 'lipasa']);
 const earlyAgeStudies = new Set(['hemograma', 'hemoglobina', 'vcm', 'hematocrito', 'reticulocitos', 'ferritina']);
 const unitValue = /[+-]?\d[\d.,]*\s*(?:[a-zµμ]+\s*\/\s*[a-zµμ]+|\/\s*[a-zµμ]+|%|fL\b|pg\b|s\b)/gi;
-const analyte = /\b(?:hemoglobina|hematocrito|plaquetas|leucocitos|eosin[oó]filos|reticulocitos|ferritina|volumen corpuscular medio|vcm|glucosa|glucemia|cetonas|sodio|potasio|creatinina|bilirrubina(?: total| directa| indirecta)?|albúmina|albumina|tiempo de protrombina|ttpa|complemento c3|proteína c reactiva|proteina c reactiva|bicarbonato|alt|ast)\b/gi;
+const analyte = /\b(?:hemoglobina|hematocrito|plaquetas|leucocitos|eosin[oó]filos|reticulocitos|ferritina|volumen corpuscular medio|vcm|glucosa|glucemia|cetonas|sodio|potasio|creatinina|bilirrubina(?: total| directa| indirecta)?|albúmina|albumina|tiempo de protrombina|ttpa|complemento c3|prote[ií]na c reactiva|pcr|vsg|procalcitonina|lactato|urea|lipasa|bicarbonato|alt|ast)\b/gi;
 export const MISSING_STUDY_VALUE = 'Valor numérico no registrado.';
 
 function rawStudyMeasurements(reply) {
@@ -106,6 +117,17 @@ function rawStudyMeasurements(reply) {
   });
   if (labelled.length) return labelled.join('; ') + '.';
   return /^\s*(?:(?:pH|INR)\s*)?[+-]?\d+(?:[.,]\d+)?\s*\.?\s*$/i.test(reply) ? reply.trim() : '';
+}
+
+export function formatSimulatedStudy(id, reply) {
+  if (!numericStudies.has(id)) return reply.trim().split(/(?<=[.!?])\s+|\n+/)
+    .map((line) => line.split(/(?:[,;]\s*|\s+)lo cual |(?:[,;]\s*|\s+)lo que (?:indica|sugiere)\b/i)[0])
+    .filter((line) => !/\b(?:sugiere|sugieren|sugestiv[oa]|compatible con|diagn[oó]stic\w*|se recomiend\w*|recomiendo|tratamiento|mantener hidratad\w*|es posible que|si los s[ií]ntomas)\b/i.test(line))
+    .slice(0, 2).join(' ').slice(0, 400);
+  const measured = rawStudyMeasurements(reply);
+  const unitless = reply.match(/\b(?:pH|INR)\s*(?:de |es de |: *)?\d+(?:[.,]\d+)?\b/gi) ?? [];
+  const values = [...new Set([measured.replace(/\.$/, ''), ...unitless].filter(Boolean))].join('; ');
+  return values ? `${values}.` : '';
 }
 
 function exampleValue(study, context) {
@@ -152,6 +174,7 @@ const reportTerms = {
   'eco-abdomen': /patron ecografico en diana|ecografi\w*[^.;]*lesion hepatica|lesion hepatica[^.;]*ecografi\w*/,
   heces: /huevos? compatibles|huevos? con tapones|antigeno de giardia|proglotides|prueba especifica compatible/,
   lcr: /pleocitosis/,
+  pcr: /\bpcr\b(?! (?:para|de|del|molecular|viral))|proteina c reactiva/,
 };
 
 function stationStudyResults(data, caseId) {
@@ -160,6 +183,7 @@ function stationStudyResults(data, caseId) {
 }
 
 function matchesStudy(study, text) {
+  if (study.id === 'pcr' && /\bpcr (?:para|de|del|molecular|viral)\b/.test(text) && !/\bproteina c reactiva\b/.test(text)) return false;
   return new RegExp(`\\b${study.aliases.source}\\b`).test(text);
 }
 
@@ -187,7 +211,8 @@ function examReport(study, data) {
 export function isStudyListRequest(question) {
   const text = normalizeClinicalRequest(question);
   return /\b(?:que|cuales) (?:son )?(?:los )?(?:paraclinicos|estudios|examenes de laboratorio) (?:hay|estan disponibles|tienen disponibles|puedo (?:solicitar|pedir|consultar))\b/.test(text)
-    || /\b(?:lista|catalogo) de (?:los )?(?:paraclinicos|estudios)\b/.test(text);
+    || /\b(?:lista|catalogo) de (?:los )?(?:paraclinicos|estudios)\b/.test(text)
+    || /\b(?:ver|consultar|mostrar|muestrame) todos los (?:paraclinicos|estudios)\b/.test(text);
 }
 
 export function studySuggestions(data, caseId) {
@@ -227,13 +252,13 @@ export function availableStudyOptions(data, caseId) {
   const edited = data.studyResults ?? [];
   const stored = [...existing.map((item) => displayStoredStudy(data, item)),
     ...edited.filter((item) => !existing.some(({ id }) => id === item.id)).map((item) => ({ ...item, reply: formatStudyResult(item) }))];
-  const seen = new Set(stored.map(({ label }) => normalizeClinicalRequest(label)));
+  const names = stored.map(({ label }) => normalizeClinicalRequest(label));
   const options = stored.filter(({ reply }) => reply && reply !== MISSING_STUDY_VALUE)
     .map(({ id, label }) => ({ id: 'stored:' + id, label, kind: 'case' }));
   for (const study of studies) {
-    if ([...seen].some((label) => matchesStudy(study, label))) continue;
+    if (['ecografia', 'radiografia'].includes(study.id) || names.some((label) => matchesStudy(study, label))) continue;
     const result = requestedStudies(data, study.label, caseId)?.supplemental.find(({ id }) => id === study.id);
-    if (result && result.kind !== 'unavailable') options.push({ id: study.id, label: study.label, kind: result.kind });
+    if (result) options.push({ id: study.id, label: study.label, kind: result.kind === 'unavailable' ? 'request' : result.kind });
   }
   return options.sort((first, second) => Number(second.kind === 'case') - Number(first.kind === 'case'));
 }
@@ -241,9 +266,13 @@ export function availableStudyOptions(data, caseId) {
 export function requestedStudies(data, question, caseId) {
   const text = normalizeClinicalRequest(question);
   const matched = studies.filter((study) => matchesStudy(study, text));
+  const name = question.replace(/^[¿¡\s]*(?:por favor[,. ]*|(?:quiero |voy a )?(?:solicito|solicitar|solicitaría|pido|pedir|quisiera|quiero|dame|hazme|muéstrame|muestra|ordeno)\s+|(?:un|una|el|la|los|las)\s+)*/i, '')
+    .replace(/[?.!]+\s*$/, '').trim().slice(0, 120);
+  const specialized = /^(?:analisis de|anticuerpos? (?:para|contra|de)|antigeno (?:para|de)|biopsia de|cultivo de|eco(?:grafia)? (?:de |del )?\w|gases |perfil |pcr (?:para|de|del|molecular|viral)|prueba (?:de|para)|radiografia (?:de|del)|resonancia (?:de|del)|serologia|tac |tomografia |ultrasonido (?:de|del))/;
+  const custom = specialized.test(normalizeClinicalRequest(name)) ? { id: 'custom:' + normalizeClinicalRequest(name), label: name } : null;
   const requested = matched.filter((study) =>
-    !(study.id === 'ecografia' && matched.some((item) => item.id.startsWith('eco-')))
-    && !(study.id === 'radiografia' && matched.some((item) => item.id.startsWith('rx-'))));
+    !(study.id === 'ecografia' && (custom || matched.some((item) => item.id.startsWith('eco-'))))
+    && !(study.id === 'radiografia' && (custom || matched.some((item) => item.id.startsWith('rx-')))));
   const explicit = studyRequest.test(text);
   const generic = /\bparaclinic[oa]s?\b/.test(text);
   const edited = (data.studyResults ?? []).filter((item) => {
@@ -266,8 +295,8 @@ export function requestedStudies(data, question, caseId) {
   const remainder = requested.reduce((current, study) =>
     current.replace(new RegExp(`\\b${study.aliases.source}\\b`, 'g'), ' '), text);
   const bare = requested.length > 0 && /^(?:(?:y|o|el|la|los|las|un|una|por favor)\b\s*|\s+)*$/.test(remainder);
-  if (!explicit && !bare && !edited.length && !documented.some((item) => text === normalizeClinicalRequest(item.label))) return null;
-  if (!requested.length && !documented.length && !edited.length && !generic
+  if (!explicit && !bare && !(custom && name === question.trim()) && !edited.length && !documented.some((item) => text === normalizeClinicalRequest(item.label))) return null;
+  if (!requested.length && !documented.length && !edited.length && !generic && !custom
       && !/\b(hemocultivos?|cultivos?|radiografias?|ecografias?|tomografias?|resonancia|prueba de laboratorio)\b/.test(text)) return null;
 
   const stored = [...documented.map((item) => item.label + ' ' + item.reply), ...edited.map((item) => item.label)].map(normalizeClinicalRequest);
@@ -289,12 +318,14 @@ export function requestedStudies(data, question, caseId) {
       reply: filled || (report ?? (simulated || (['radiografia', 'ecografia'].includes(study.id)
         ? 'Indica la región de la imagen para consultar el resultado.' : numeric ? MISSING_STUDY_VALUE : 'El caso no trae un resultado para este estudio.'))),
       kind: report && report !== MISSING_STUDY_VALUE ? 'case' : simulated ? 'simulated' : 'unavailable',
+      ...(!simulated && (!caseResult || report === MISSING_STUDY_VALUE && !/pendiente|por confirmar|sin resultado/i.test(caseResult))
+        && !['ecografia', 'radiografia'].includes(study.id) ? { canSimulate: true } : {}),
     });
   }
   if (!documented.length && !supplemental.length) {
-    supplemental.push({ id: 'unknown-study', label: 'Paraclínico solicitado',
+    supplemental.push({ ...(custom ?? { id: 'unknown-study', label: 'Paraclínico solicitado' }),
       reply: generic ? 'Indica el nombre del estudio. Para una imagen, incluye también la región.'
-        : 'El caso no trae un resultado para ese estudio. Si pediste una imagen, indica la región.', kind: 'unavailable' });
+        : 'El caso no trae un resultado para este estudio.', kind: 'unavailable', ...(custom ? { canSimulate: true } : {}) });
   }
   return { documented: documented.map((item) => displayStoredStudy(data, item)), supplemental };
 }

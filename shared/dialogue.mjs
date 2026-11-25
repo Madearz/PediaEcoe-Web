@@ -35,7 +35,7 @@ const subjects = [
   [/\b(comer|come|beber|bebe|tomas?|tomando|alimentacion|leche|pecho)\b/, /alimenta|tolerancia|ingesta|tomas?|bebe|leche|pecho|sorbos/],
   [/\b(orina|orinar|pip[ií]|panales?|miccion)\b/, /orin|diuresis|panal|panales|miccion/],
   [/\b(?:vomit\w*|vomits\w*|emesis|devuelve)\b/, /vomit|emesis|devolvi/],
-  [/\b(diarrea|deposiciones?|evacua|popo|heces)\b/, /diarrea|deposicion|evacu|heces/],
+  [/\b(diarrea|deposiciones?|evacua|popo|heces)\b/, /diarrea|deposicion|evacu|heces|popo/],
   [medicationQuestion, medicationQuestion],
   [allergyQuestion, /alerg/],
   [vaccineQuestion, vaccineFact],
@@ -59,8 +59,11 @@ const openQuestion = /\b(que (?:(?:le|lo|la|les|los|las|te) )?(?:trae|trajo|paso
 const followUp = /^(?:y )?(?:desde cuando|cuando fue|hace cuanto|cuanto tiempo|luego|despues|que paso despues|que mas|algo mas|me cuenta mas|podria contarme mas|eso|como asi)(?: paso| exactamente)?$/;
 const ageQuestion = /\b(que edad tiene|cuantos (?:anos|meses) tiene|cual es (?:la|su) edad)\b/;
 const outOfRole = /\b(?:no (?:tengo|cuento con|dispongo de) (?:ese|el|este) dato|no recuerdo bien ese detalle|pregunt\w* de otra (?:forma|manera)|reformul\w* (?:la|su|tu) pregunta|(?:no se (?:han )?)?(?:detect\w*|identific\w*|observ\w*) (?:de )?(?:comportamientos? inadecuados?|contenido (?:inadecuado|inapropiado|ofensivo)))\b/;
+const assistantVoice = /\b(?:soy (?:un |una )?(?:modelo de lenguaje|inteligencia artificial|asistente virtual)|estoy aqui para (?:ayudarte|ayudarle|escucharte|escucharle)|en que (?:te |le )?puedo ayudar|de que (?:te |le )?gustaria hablar|cuentame (?:mas|como puedo ayudarte)|no estoy enferm[oa] hoy)\b/;
 const onsetOfIllness = /\b(?:enferm[oa]|est[aá] asi|esta enfermo|con esto|empezo todo|comenzo todo)\b/;
 const frequencyQuestion = /\b(?:cuant[oa]s\b(?! (?:dias?|horas?|meses?|semanas?)\b)|cada cuanto|con que frecuencia)\b/;
+const countPatterns = [/\b(?:1|una|uno|un)\b/, /\b(?:2|dos)\b/, /\b(?:3|tres)\b/, /\b(?:4|cuatro)\b/, /\b(?:5|cinco)\b/,
+  /\b(?:6|seis)\b/, /\b(?:7|siete)\b/, /\b(?:8|ocho)\b/, /\b(?:9|nueve)\b/, /\b(?:10|diez)\b/];
 const detailFacets = [
   [/\b(?:en que (?:parte|lado|zona|lugar)|donde|ubicacion|localizacion|distribucion|se extendio|se riega|se propag)\w*\b/, /\b(?:cabeza|cara|mejillas?|cuello|cervical\w*|axila\w*|inguinal\w*|ingle\w*|occipital\w*|retroauricular\w*|detras de (?:las? )?orejas?|parpado|piel|tronco|brazos?|manos?|piernas?|pies?|abdomen|pecho|costado|alrededor|dispers\w*|generalizad\w*)\b/,
     'No sabría señalarle en qué parte exactamente.'],
@@ -72,13 +75,13 @@ const detailFacets = [
     'No he podido precisar cómo ha cambiado.'],
   [/\b(?:que tan (?:fuerte|intenso)|cuanto (?:le )?duele|intensidad|que (?:lo |le )?(?:empeora|alivia|mejora)|con que (?:empeora|mejora))\b/, /\b(?:mucho|leve|fuerte|intens\w*|posicional|al acostar\w*|al mover\w*|al respirar|alivi\w*|empeor\w*|lo despierta)\b/,
     'No sabría decirle qué tanto le molesta o qué lo cambia.'],
-  [/\b(?:como (?:es|son|era|eran|se ve|se ven|se siente|se sienten)|describ\w*|aspecto|color|forma|tamano|morfologia|pica|rasca|prurito)\b/,
-    /\b(?:roj\w*|rosad\w*|palid\w*|oscur\w*|morad\w*|ampoll\w*|vesicul\w*|erosion\w*|costra\w*|tenue\w*|agrupad\w*|elevad\w*|plan\w*|pic\w*|prurito|doloros\w*|irrit\w*|seca|humeda|espes\w*|verdos\w*|amarill\w*|bilis|bilios\w*|alimentari\w*|restos de comida|comida sin digerir|en (?:proyectil|chorro)|acuos\w*|con sangre|sin sangre|dolor punzante|bultos? (?:duros?|blandos?))\b/,
+  [/\b(?:como (?:es|son|era|eran|se ve|se ven|se siente|se sienten)|que (?:ha notado|noto) con lo que devuelve|describ\w*|aspecto|color|forma|tamano|morfologia|pica|rasca|prurito)\b/,
+    /\b(?:roj\w*|rosad\w*|palid\w*|oscur\w*|morad\w*|ampoll\w*|vesicul\w*|erosion\w*|costra\w*|tenue\w*|agrupad\w*|elevad\w*|plan\w*|pic\w*|prurito|doloros\w*|irrit\w*|seca|humeda|espes\w*|verdos\w*|amarill\w*|liquid\w*|moco|bilis|bilios\w*|alimentari\w*|restos de comida|comida sin digerir|en (?:proyectil|chorro)|acuos\w*|con sangre|sin sangre|dolor punzante|bultos? (?:duros?|blandos?))\b/,
     'No me fijé bien en ese detalle.'],
 ];
 const associatedQuestion = /\b(?:(?:algun(?:os)? |alguna(?:s)? )?otr[oa]s? (?:sintomas?|molestias?)|(?:que|algo) mas (?:ha (?:notado|tenido)|le pasa|le duele|le molesta)|que sintomas? (?:mas|aparte))\b/;
 const systemsQuestion = /\b(?:revision por sistemas|interrogatorio por sistemas|sintomas? (?:en|por) otros sistemas)\b/;
-const symptomQuestion = /\b(?:ha tenido|ha presentado|lo ha visto|ha notado|dijo que tiene|tiene|tenia|presenta|siente|le ha dado|le dio|le da|le cuesta|ha estado)\b/;
+const symptomQuestion = /\b(?:tuvo|dio|ha tenido|ha presentado|lo ha visto|ha notado|dijo que tiene|tiene|tenia|presenta|siente|le ha dado|le dio|le da|le cuesta|ha estado)\b/;
 const backgroundDetails = [
   [/\b(?:antecedentes? familiares?|historia familiar|en la familia|familiares?|alguien de su familia)\b/, /\b(?:familia\w*|hereditar\w*|madre|padre|mama|papa|herman\w*|abuel\w*)\b/, 'No sabría confirmarle si hay antecedentes en la familia.'],
   [/\b(?:hospitaliz\w*|internad\w*|ingresos? previos?)\b/, /\b(?:hospitaliz\w*|internad\w*|ingresos? previos?)\b/, 'No recuerdo una hospitalización anterior que pueda contarle.'],
@@ -358,10 +361,21 @@ export function focusedHistoryReply(currentCase, question, history = [], allowUn
   return null;
 }
 
-export function patientReplyFits(currentCase, question, reply, history = []) {
+export function patientReplyFits(currentCase, question, reply, history = [], cue) {
   const answer = normalize(reply);
-  if (outOfRole.test(answer)) return false;
+  if (outOfRole.test(answer) || assistantVoice.test(answer)) return false;
   const text = questionText(question);
+  if (cue && frequencyQuestion.test(text)) {
+    const count = normalize(cue).match(/\b(\d+|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez) (?:vez|veces|episodios?|vomit\w*)\b/)?.[1];
+    const range = count && countPatterns.find((pattern) => pattern.test(count));
+    if (count && !(range ? range.test(answer) : answer.split(' ').includes(count))) return false;
+  }
+  const facts = normalize([currentCase.opening, ...interviewFacts(currentCase).map(({ reply: fact }) => fact)].join(' '));
+  for (const phrase of reply.split(/[,.;!?]+/).map(normalize)) {
+    const absent = phrase.match(/\b(?:no (?:tiene|ha tenido|tuvo|presenta)|sin) (.+)/)?.[1];
+    if (absent && /^(?:fiebre|dolor|tos|vomit\w*|diarrea|sangrado)(?: |$)/.test(absent)
+      && symptomFacts.some(([pattern, fact]) => pattern.test(absent) && !fact.test(facts))) return false;
+  }
   if (openQuestion.test(text) || followUp.test(text)) return true;
   const topics = subjects.filter(([pattern]) => pattern.test(text));
   if (answer === normalize(currentCase.opening) && !topics.some(([, fact]) => fact.test(answer))) return false;

@@ -375,11 +375,13 @@ test('la entrevista conserva el personaje y descarta respuestas repetidas al cam
   const env = { AI_ENABLED: 'true', AI: { run: async () => ({ response }) },
     LIMITS: { getByName: () => ({ fetch: async () => new Response(null, { status: 204 }) }) } };
   const ask = async (question) => (await app(call('/circuits/circuit-id/dialogue', { question, history }), env)).json();
-  for (response of ['No se detectaron comportamientos inadecuados.', 'Puede reformular su pregunta.', data.opening, history[0].reply]) {
+  for (response of ['No se detectaron comportamientos inadecuados.', 'Puede reformular su pregunta.', data.opening, history[0].reply,
+    'No estoy enfermo hoy, pero estoy aquí para escucharte. ¿De qué te gustaría hablar?']) {
     assert.deepEqual(await ask('¿Algo del jardín?'), { mode: 'structured', reply: 'No sabría precisarlo. Le puedo contar lo que sí he observado.' });
   }
   assert.deepEqual(await ask('¿Tiene tos?'), { mode: 'structured', reply: 'Empezó a toser ayer.' });
   assert.deepEqual(await ask('¿Tiene las vacunas al día?'), { mode: 'structured', reply: 'Le faltan algunas vacunas.' });
+  response = history[0].reply;
   assert.deepEqual(await ask('¿Dónde empezó la erupción?'), { mode: 'ai', reply: history[0].reply });
   response = 'En casa ha estado más irritable.';
   assert.deepEqual(await ask('¿Cómo se ha comportado en casa?'), { mode: 'ai', reply: response });
@@ -432,10 +434,13 @@ test('la anamnesis encadena detalles del síntoma, otros síntomas y medicamento
   const vomiting = { ...currentCase, opening: 'Vomita desde ayer.', interactions: [
     { group: 'anamnesis', label: 'Número de vómitos', reply: 'Fueron cuatro episodios.' },
     { group: 'anamnesis', label: 'Aspecto del vómito', reply: 'Eran restos de comida, sin sangre.' },
+    { group: 'anamnesis', label: 'Deposiciones y temperatura', reply: 'Las deposiciones eran líquidas. Tuvo fiebre anoche.' },
   ] };
   assert.equal(structured(vomiting, '¿Desde hace cuánto está así?'), 'Vomita desde ayer.');
   assert.match(structured(vomiting, '¿Cómo son los vómitos y cuántos fueron?'), /cuatro episodios.*restos de comida/);
   assert.match(structured(vomiting, '¿Cuántos?', [{ question: '¿Cómo son los vómitos?' }]), /cuatro episodios/);
+  assert.equal(structured(vomiting, '¿Cómo eran las deposiciones?'), 'Las deposiciones eran líquidas.');
+  assert.equal(structured(vomiting, '¿Tuvo fiebre?'), 'Tuvo fiebre anoche.');
   assert.match(structured({ ...vomiting, interactions: [] }, '¿Cuántos vómitos ha tenido?'), /No alcancé a contar/);
 });
 
@@ -736,8 +741,38 @@ test('el listado de paraclínicos incluye informes con resultado y distingue los
   for (const option of options) {
     const report = requestedStudies(station, `Solicito ${option.label}`);
     if (option.kind === 'case') assert.ok(report.documented.length || report.supplemental.some(({ kind }) => kind === 'case'));
-    else assert.ok(report.supplemental.some(({ kind }) => kind === 'simulated'));
+    else assert.ok(report.supplemental.some(({ kind }) => kind === (option.kind === 'request' ? 'unavailable' : 'simulated')));
   }
+});
+
+test('los paraclínicos nuevos se simulan solo para la estación autenticada y sin sustituir registros', async () => {
+  const data = { ...example[0].data, title: 'Fiebre y tos', opening: 'Desde ayer tiene tos y fiebre.', interactions: [],
+    studyResults: [{ id: 'known-glucose', label: 'Glucosa', value: '92', unit: 'mg/dL', reference: '' }] };
+  const identity = { uid: 'student', email: 'student@example.com' };
+  const db = { async get(path) {
+    if (path.startsWith('authorized_emails/')) return { data: { active: true } };
+    if (path.startsWith('simulation_sessions/')) return { data: { uid: identity.uid, index: 0, deadline: Date.now() + 10000 } };
+    return { data: { cases: [{ public: data }] } };
+  } };
+  const app = createHandler({ verify: async () => identity, database: () => db });
+  let providerCalls = 0;
+  const results = [{ id: 'pcr', reply: 'Proteína C reactiva 24 mg/L.' }, { id: 'vsg', reply: 'VSG 25 mm/h.' },
+    { id: 'glucosa', reply: 'Glucosa 400 mg/dL.' }];
+  const env = { AI_ENABLED: 'true', AI: { run: async () => {
+    providerCalls++;
+    return { response: JSON.stringify({ results: results.map((result) => ({ ...result, reply: result.reply + ' Se considera elevado.' })) }) };
+  } },
+    LIMITS: { getByName: () => ({ fetch: async () => new Response(null, { status: 204 }) }) } };
+  const path = '/circuits/circuit-id/studies';
+  const body = { question: 'Solicito PCR, VSG y glucosa', ids: ['pcr', 'vsg', 'glucosa'], index: 0 };
+  assert.equal((await app(call(path, { ...body, index: 1 }), env)).status, 409);
+  assert.equal((await app(new Request('https://worker.example' + path), env)).status, 401);
+  assert.equal(providerCalls, 0);
+  assert.deepEqual(await (await app(call(path, body), env)).json(), { results: results.slice(0, 2) });
+  assert.equal(providerCalls, 1);
+  assert.equal(requestedStudies(data, 'PCR').supplemental[0].id, 'pcr');
+  assert.equal(requestedStudies(data, 'Solicito PCR para adenovirus').supplemental[0].id, 'custom:pcr para adenovirus');
+  assert.equal(requestedStudies(data, 'Solicito un eco de cadera').supplemental[0].canSimulate, true);
 });
 
 test('el repaso distingue decisiones incorrectas de criterios omitidos y sirve con notas antiguas', async () => {
