@@ -1,3 +1,5 @@
+import { bankTreatment, treatmentReferences } from './bank-treatment.mjs';
+
 const reasoningSamples = {
   'demo-bronquiolitis': { diagnosis: '20470a640482', support: ['bf1bb96fdb65', '606a533ae3ae'] },
   'demo-deshidratacion': { diagnosis: '59d0c4d6ccc7', support: ['fe7ddf8e3d8f', '1835c08f8133'] },
@@ -136,7 +138,7 @@ const courseSamples = {
   },
 };
 
-function bankDecisions(data, rubric) {
+function bankDecisions(id, data, rubric) {
   const actions = data.interactions.filter(({ group }) => group === 'acciones');
   const followUps = data.interactions.filter(({ group }) => group === 'cierre');
   const expected = new Set(rubric.criteria.map(({ id }) => id));
@@ -145,12 +147,18 @@ function bankDecisions(data, rubric) {
   const followUp = followUps.find(({ id }) => expected.has(id));
   const wrongFollowUp = followUps.find(({ id }) => !expected.has(id));
   if (!action || !wrongAction || !followUp || !wrongFollowUp) return null;
-  const options = [action, wrongAction].flatMap((plan, index) => [followUp, wrongFollowUp].map((check, position) => ({
-    id: `plan-${index}-${position}`,
-    label: [plan.label, check.label].map((label) => label.replace(/[.!?]+$/, '')).join('. ') + '.',
-  })));
+  const slug = id.slice('practica100-'.length);
+  const variants = bankTreatment[slug];
+  const plans = [action, wrongAction];
+  const complete = plans.every((plan) => variants?.[plan.id]);
+  const options = plans.flatMap((plan) => [followUp, wrongFollowUp].map((check) => {
+    const treatment = complete ? variants[plan.id] : plan.label;
+    const label = [treatment, check.label].map((part) => part.replace(/[.!?]+$/, '')).join('. ') + '.';
+    return { id: crypto.randomUUID(), label };
+  }));
   if (options.some(({ label }) => label.length > 240)) return null;
-  return { options, key: { accepted: ['plan-0-0'], source: rubric.reference,
+  const source = (complete && treatmentReferences[slug]) || rubric.reference;
+  return { options, key: { accepted: [options[0].id], source,
     explanation: 'En esta estación se evalúa el conjunto de la conducta inicial y el seguimiento o la comunicación del plan.' } };
 }
 
@@ -163,7 +171,7 @@ export function withPracticeDecisions(id, station, shuffle) {
   const reasoning = !rubric.reasoning && sample && ids.has(sample.diagnosis) && sample.support.every((item) => ids.has(item));
   const sampleCourse = courseSamples[id];
   const course = sampleCourse && ids.has(sampleCourse.action) && data.opening === sampleCourse.opening ? sampleCourse
-    : bankCase ? bankDecisions(data, rubric) : null;
+    : bankCase ? bankDecisions(id, data, rubric) : null;
   const treatment = course && !data.treatmentOptions && !rubric.prescription;
   return {
     public: data.treatmentOptions || treatment ? { ...data,

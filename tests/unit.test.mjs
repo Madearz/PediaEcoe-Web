@@ -371,6 +371,35 @@ test('las pautas se eligen sin cálculo y se puntúan solo con una clave válida
   assert.equal(grade(sample.data, sample.rubric, selections).score, 100);
 });
 
+test('el banco combina tratamientos concretos con el cierre y conserva la clave al barajar', () => {
+  const caseId = 'practica100-panal-irritativa';
+  const { data, rubric } = example[0];
+  const interactions = data.interactions.filter(({ group }) => !['acciones', 'cierre'].includes(group));
+  interactions.push(
+    { id: 'b918bf78129b2f', group: 'acciones', label: 'Proteger la barrera cutánea', reply: '' },
+    { id: 'f561de6409bf6f', group: 'acciones', label: 'Indicar antibióticos de rutina', reply: '' },
+    { id: 'plan-correcto', group: 'cierre', label: 'Explicar cuándo volver', reply: '' },
+    { id: 'plan-incorrecto', group: 'cierre', label: 'Omitir el seguimiento', reply: '' },
+  );
+  const criteria = rubric.criteria.map((criterion) => {
+    if (criterion.domain === 3) return { ...criterion, id: 'b918bf78129b2f' };
+    if (criterion.domain === 4) return { ...criterion, id: 'plan-correcto' };
+    return criterion;
+  });
+  const station = { public: { ...data, interactions }, rubric: { ...rubric, criteria, critical: [] } };
+  const prepared = withPracticeDecisions(caseId, station, (rows) => rows.reverse());
+  assert.equal(validCase(prepared.public, prepared.rubric), true);
+  const options = prepared.public.treatmentOptions;
+  const selected = options.find(({ label }) => /óxido de zinc.*Explicar cuándo volver/.test(label));
+  const alternative = options.find(({ label }) => /óxido de zinc.*Omitir el seguimiento/.test(label));
+  assert.equal(options.length, 4);
+  assert.notEqual(options[0].id, selected.id);
+  assert.notEqual(selected.id, withPracticeDecisions(caseId, station, (rows) => rows).public.treatmentOptions[0].id);
+  const evaluate = (option) => grade(prepared.public, prepared.rubric, [], [], { treatment: { option } }).treatment.checks[0].earned;
+  assert.equal(evaluate(selected.id), true);
+  assert.equal(evaluate(alternative.id), false);
+});
+
 test('Worker bloquea IA para cuenta anónima, sin invitación, revocada o circuito ajeno', async () => {
   let invitation = 'missing';
   let uid = 'other';
