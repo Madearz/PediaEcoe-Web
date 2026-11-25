@@ -14,12 +14,15 @@ import { isVaccinationCardRequest, patientHistoryReply, PATIENT_HISTORY_LIMIT, v
 import { EXAM_AREAS, examAreas, requestedExam, systemExam, type ExamArea } from '../shared/exam.mjs';
 import { availableStudyOptions, displayStoredStudy, isStudyListRequest, MISSING_STUDY_VALUE, requestedStudies, studySuggestions, type StudyFinding } from '../shared/studies.mjs';
 import { FOLLOW_UP, JUSTIFICATION_LIMIT, registerAnamnesis, type FollowUp } from '../shared/learning.mjs';
+import { type ReasoningNote, type TreatmentPlan } from '../shared/decisions.mjs';
+import { ReasoningFields, TreatmentFields } from './Decisions';
 
 type Evolution = { action: string; findings: string[] };
 type StationClock = { deadline: number; serverNow: number; pausedRemaining?: number | null };
 type Session = { id: string; index: number; complete: boolean; case: CaseData | null; caseIds?: string[]; titles: string[]; deadline: number | null; serverNow: number;
   pausedRemaining?: number | null; hasEvolution?: boolean; evolution?: Evolution };
 type Turn = { question: string; reply: string; mode: 'structured'|'ai'; clinical?: boolean };
+type DecisionDraft = { reasoning: ReasoningNote[]; treatment: TreatmentPlan; nextTest: string };
 type SupplementalFinding = StudyFinding & { group: 'exploracion'|'paraclinicos' };
 const turnLabel = (turn: Turn) => turn.clinical ? 'Resultado de la estación' : turn.mode === 'ai' ? 'IA generativa' : 'Respuesta estructurada';
 type Existing = { id: string; index: number; complete: boolean };
@@ -67,6 +70,15 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
     return Object.hasOwn(FOLLOW_UP, saved) ? saved as FollowUp : '';
   });
   const [justification, setJustification] = useState(() => readDraft('justification').slice(0, JUSTIFICATION_LIMIT));
+  const [decisionDraft, setDecisionDraft] = useState<DecisionDraft>(() => {
+    try { const saved = JSON.parse(readDraft('decisions')); if (saved?.treatment && Array.isArray(saved.reasoning)) return saved; }
+    catch { /* A new draft is available if storage is unavailable. */ }
+    return { reasoning: [], treatment: {}, nextTest: '' };
+  });
+  function updateDecisions(next: DecisionDraft) {
+    setDecisionDraft(next);
+    saveDraft('decisions', JSON.stringify(next));
+  }
   const [finishing, setFinishing] = useState(false);
   const [differentials, setDifferentials] = useState<string[]>(() => {
     try {
@@ -145,16 +157,18 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
       const { resultId } = await call<{ resultId: string }>(user, '/circuits/' + session.id + '/submit', {
         index: session.index, selections: selectedRef.current, justification,
         differentials: differentials.filter((id) => id !== principal),
+        reasoning: decisionDraft.reasoning.filter((row) => row.diagnosis === principal || differentials.includes(row.diagnosis)),
+        treatment: decisionDraft.treatment, nextTest: decisionDraft.nextTest,
         ...(evolution && followUp ? { followUp } : {}),
       });
       try {
         sessionStorage.removeItem(storageKey);
-        for (const key of ['justification', 'followup', 'differentials', 'anamnesis', 'studies']) sessionStorage.removeItem(storageKey + ':' + key);
+        for (const key of ['justification', 'followup', 'differentials', 'anamnesis', 'studies', 'decisions']) sessionStorage.removeItem(storageKey + ':' + key);
       } catch { /* Storage may be disabled. */ }
       onSaved(resultId);
     } catch (failure) { setError(messageOf(failure)); }
     finally { submitting.current = false; setSaving(false); }
-  }, [onSaved, session.id, session.index, stopDictation, storageKey, user, voiceCall, paused, justification, differentials, evolution, followUp, station.interactions]);
+  }, [onSaved, session.id, session.index, stopDictation, storageKey, user, voiceCall, paused, justification, differentials, decisionDraft, evolution, followUp, station.interactions]);
   useEffect(() => {
     if (clockInfo.pausedRemaining) { setTime(clockInfo.pausedRemaining); return; }
     const baseline = performance.now();
@@ -379,6 +393,8 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
   const clock = [Math.floor(totalSeconds / 60), totalSeconds % 60].map((value) => String(value).padStart(2, '0')).join(':');
   const centralGroup = phases[phase][0];
   const diagnosis = station.interactions.filter((item) => item.group === 'razonamiento');
+  const hypotheses = [...diagnosis.filter(({ id }) => selected.includes(id)), ...diagnosis.filter(({ id }) => differentials.includes(id) && !selected.includes(id))];
+  const observed = station.interactions.filter(({ id, group }) => selected.includes(id) && ['anamnesis', 'exploracion', 'paraclinicos'].includes(group));
   const action = selected.find((id) => station.interactions.some((item) => item.id === id && item.group === 'acciones'));
   const toolOptions = tool === 'exploracion'
     ? examOptions.filter((item) => examArea === 'all' || item.areas.includes(examArea))
@@ -539,6 +555,12 @@ function Station({ user, session, onSaved }: { user: User; session: Session; onS
             }}>{item.label}</button>;
         })}</div>
       </fieldset>}
+      {phase === 2 && <ReasoningFields diagnoses={hypotheses} observed={observed} notes={decisionDraft.reasoning} nextTest={decisionDraft.nextTest}
+        disabled={!canInteract || saving} update={(note) => updateDecisions({ ...decisionDraft,
+          reasoning: [...decisionDraft.reasoning.filter((previous) => previous.diagnosis !== note.diagnosis), note],
+        })} updateTest={(nextTest) => updateDecisions({ ...decisionDraft, nextTest })}/>}
+      {phase === 3 && <TreatmentFields options={station.treatmentOptions} value={decisionDraft.treatment}
+        disabled={!canInteract || saving} update={(treatment) => updateDecisions({ ...decisionDraft, treatment })}/>}
     </section>
     {session.hasEvolution && (action || evolution) && <section className="card station-options">
       <h2><Activity size={21}/> Evolución del paciente</h2>

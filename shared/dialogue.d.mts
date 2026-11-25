@@ -1,4 +1,5 @@
 import type { CaseData, VaccinationCard } from './clinical.mjs';
+export function hospitalHistoryQuestion(question: string, history?: { question: string; reply?: string }[]): boolean;
 export const PATIENT_HISTORY_LIMIT: number;
 export function patientAge(data: CaseData): string | undefined;
 export function patientBackgroundReply(data: CaseData, question: string, history?: { question: string; reply?: string }[]): string | null;

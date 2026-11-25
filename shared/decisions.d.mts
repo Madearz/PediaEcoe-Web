@@ -1,0 +1,16 @@
+import type { CaseData, Interaction } from './clinical.mjs';
+export type TreatmentOption = { id: string; label: string };
+export type PrescriptionKey = { accepted: string[]; source: string; explanation?: string };
+export type TreatmentPlan = { option?: string; monitor?: string };
+export type ReasoningNote = { diagnosis: string; support?: string; counter?: string; for?: string; against?: string };
+export type ReasoningKey = { diagnosis: string; support?: string[]; counter?: string[] };
+export type DecisionCheck = { label: string; earned: boolean; tip: string };
+export type ReasoningResult = { entries: ReasoningNote[]; checks: DecisionCheck[]; nextTest?: string };
+export type TreatmentResult = { submitted: { choice?: string; monitor?: string }; checks: DecisionCheck[]; source?: string; explanation?: string };
+export function validTreatmentOptions(value: unknown): value is TreatmentOption[];
+export function validPrescriptionKey(value: unknown, data: CaseData): value is PrescriptionKey;
+export function validReasoningNotes(value: unknown, diagnoses: string[], observed: string[]): value is ReasoningNote[];
+export function validReasoningKey(key: unknown, interactions: Interaction[]): key is ReasoningKey[];
+export function validTreatmentPlan(plan: unknown, options?: TreatmentOption[]): plan is TreatmentPlan;
+export function evaluateReasoning(data: CaseData, key?: ReasoningKey[], notes?: ReasoningNote[], nextTest?: string): ReasoningResult;
+export function evaluateTreatment(data: CaseData, key?: PrescriptionKey, plan?: TreatmentPlan): TreatmentResult | null;

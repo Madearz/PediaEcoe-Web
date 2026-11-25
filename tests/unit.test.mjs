@@ -10,6 +10,7 @@ import { caseGroups } from '../shared/case-groups.mjs';
 import { examAreas, requestedExam, systemExam } from '../shared/exam.mjs';
 import { practiceFocus, registerAnamnesis } from '../shared/learning.mjs';
 import { addDiagnosticChoices } from '../worker/evolutions.mjs';
+import { withPracticeDecisions } from '../worker/decision-cases.mjs';
 import { availableStudyOptions, displayStoredStudy, isStudyListRequest, MISSING_STUDY_VALUE, requestedStudies, studySuggestions } from '../shared/studies.mjs';
 import { readFile } from 'node:fs/promises';
 
@@ -297,6 +298,40 @@ test('la entrevista interpreta muletillas y preguntas cortas según el tema ante
     'También tuvo fiebre ayer.');
   assert.equal(structured(currentCase, 'Ah bueno y desde cuándo', [{ question: '¿Tiene tos?', reply: 'Sí, tose.' }]), 'Empezó anoche.');
   assert.equal(structured(currentCase, 'A ver y por los de antes', [{ question: '¿Toma medicamentos?' }]), 'Antes tomaba hierro.');
+});
+
+test('el familiar reconoce hospitalización previa y responde repreguntas del mismo ingreso', () => {
+  const base = { opening: 'Le duele la barriga.', interactions: [{ group: 'anamnesis', label: 'Hospitalizaciones',
+    reply: 'Lo internaron por neumonía hace dos años. Estuvo tres días.' }] };
+  const question = 'Ajá, ¿alguna vez se quedó en el hospital o algo así?';
+  for (const wording of [question, '¿Había estado hospitalizado?', '¿Lo han internado antes?', '¿Lo ingresaron alguna vez?']) {
+    assert.equal(structured(base, wording), base.interactions[0].reply);
+  }
+  const history = [{ question, reply: base.interactions[0].reply }];
+  assert.equal(structured(base, '¿Y por qué fue?', history), 'Fue por neumonía.');
+  assert.equal(structured(base, '¿Y hace cuánto?', history), 'Hace dos años.');
+  assert.equal(structured(base, '¿Y cuántos días estuvo?', history), 'Tres días.');
+  assert.match(structured({ ...base, interactions: [] }, question), /Que yo sepa/);
+});
+
+test('las pautas se eligen sin cálculo y se puntúan solo con una clave válida', () => {
+  const sample = example.find(({ id }) => id === 'demo-deshidratacion');
+  const { public: data, rubric } = withPracticeDecisions(sample.id, { public: sample.data, rubric: sample.rubric }, (rows) => [...rows].reverse());
+  assert.equal(validCase(data, rubric), true);
+  assert.equal(data.treatmentOptions.length, 3);
+  assert.equal(Object.hasOwn(data, 'prescription'), false);
+  assert.equal(validCase(data, { ...rubric, prescription: { ...rubric.prescription, accepted: ['pauta-ajena'] } }), false);
+  const selections = rubric.criteria.map(({ id }) => id);
+  const reasoning = [{ diagnosis: rubric.reasoning[0].diagnosis, support: rubric.reasoning[0].support[0] }];
+  const result = grade(data, rubric, selections, [], { reasoning, treatment: { option: 'sro-75-oral', monitor: 'Reevaluar hidratación.' } });
+  assert.equal(result.score, 100);
+  assert.match(result.treatment.submitted.choice, /75 mL\/kg/);
+  assert.equal(result.treatment.checks[0].earned, true);
+  assert.equal(result.reasoning.checks[0].earned, true);
+  const incorrect = grade(data, rubric, selections, [], { treatment: { option: 'sro-150-oral' } });
+  assert.equal(incorrect.domains[3], 15);
+  assert.equal(incorrect.domains[2], 16);
+  assert.equal(grade(sample.data, sample.rubric, selections).score, 100);
 });
 
 test('Worker bloquea IA para cuenta anónima, sin invitación, revocada o circuito ajeno', async () => {

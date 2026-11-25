@@ -1,10 +1,12 @@
 import { ApiError, firestore, verifyGoogleToken } from './firebase.mjs';
 import { DAILY_CIRCUITS_DEFAULT, DAILY_CIRCUITS_MAX, grade, normalizeEmail, STATION_MS, structured, validAnswers, validCase, validId } from '../shared/clinical.mjs';
-import { PATIENT_HISTORY_LIMIT, focusedHistoryReply, isVaccinationCardRequest, patientAge, patientBackgroundReply, patientHistoryReply, patientReplyFits } from '../shared/dialogue.mjs';
+import { PATIENT_HISTORY_LIMIT, focusedHistoryReply, hospitalHistoryQuestion, isVaccinationCardRequest, patientAge, patientBackgroundReply, patientHistoryReply, patientReplyFits } from '../shared/dialogue.mjs';
 import { reviewFacts, reviewReply } from '../shared/review.mjs';
 import { FOLLOW_UP, JUSTIFICATION_LIMIT } from '../shared/learning.mjs';
 import { fallbackStudyValue, formatSimulatedStudy, requestedStudies } from '../shared/studies.mjs';
+import { validReasoningNotes, validTreatmentPlan } from '../shared/decisions.mjs';
 import { addDiagnosticChoices, evolutions } from './evolutions.mjs';
+import { withPracticeDecisions } from './decision-cases.mjs';
 
 const limits = { start: [DAILY_CIRCUITS_DEFAULT, 350], dialogue: [24, 800], messages: [40, 2000] };
 const validCircuitLimit = (value) => Number.isInteger(value) && value >= DAILY_CIRCUITS_DEFAULT && value <= DAILY_CIRCUITS_MAX;
@@ -116,7 +118,7 @@ async function newCircuit(db, env, identity, invitation, requested) {
       if (data.data.status !== 'published') return null;
       const rubric = await db.get('case_rubrics/' + id, true);
       if (!validCase(data.data, rubric.data)) return null;
-      return addDiagnosticChoices(id, data.data, rubric.data, shuffle);
+      return withPracticeDecisions(id, addDiagnosticChoices(id, data.data, rubric.data, shuffle), shuffle);
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) return null;
       throw error;
@@ -204,7 +206,7 @@ async function changeClock(db, invitation, session, id, params, action) {
 }
 
 async function submit(db, invitation, session, id, params) {
-  permittedShape(params, ['index', 'selections', 'justification', 'followUp', 'differentials']);
+  permittedShape(params, ['index', 'selections', 'justification', 'followUp', 'differentials', 'reasoning', 'treatment', 'nextTest']);
   if (!Number.isInteger(params.index) || params.index < 0 || params.index > 2) {
     throw new ApiError(400, 'Estación inválida.');
   }
@@ -231,6 +233,14 @@ async function submit(db, invitation, session, id, params) {
       || differentials.some((item) => !diagnoses.has(item) || params.selections.includes(item))) {
     throw new ApiError(400, 'Elige hasta dos diferenciales distintos del diagnóstico principal.');
   }
+  const observed = currentCase.interactions.filter(({ id, group }) => params.selections.includes(id)
+    && ['anamnesis', 'exploracion', 'paraclinicos'].includes(group)).map(({ id }) => id);
+  if (params.reasoning !== undefined && !validReasoningNotes(params.reasoning,
+    [...params.selections.filter((item) => diagnoses.has(item)), ...differentials], observed)) {
+    throw new ApiError(400, 'Revisa las hipótesis y los hallazgos registrados.');
+  }
+  if (params.treatment !== undefined && !validTreatmentPlan(params.treatment, currentCase.treatmentOptions)) throw new ApiError(400, 'Revisa el formato de la orden.');
+  if (params.nextTest !== undefined && (typeof params.nextTest !== 'string' || params.nextTest.length > 240)) throw new ApiError(400, 'El estudio propuesto supera el tamaño permitido.');
   // A short delivery grace accommodates transport latency after the visible deadline.
   const inTime = Date.now() <= data.deadline + 8000;
   const { evolution, ...sessionData } = data;
@@ -238,7 +248,8 @@ async function submit(db, invitation, session, id, params) {
   const otherActions = new Set(currentCase.interactions.filter((item) => item.group === 'acciones').map(({ id }) => id));
   const submitted = inTime ? params.selections : [];
   const selections = lockedAction ? [...submitted.filter((id) => !otherActions.has(id)), lockedAction] : submitted;
-  const gradeData = grade(currentCase, rubric, selections, inTime ? differentials : []);
+  const gradeData = grade(currentCase, rubric, selections, inTime ? differentials : [], inTime
+    ? { reasoning: params.reasoning, treatment: params.treatment, nextTest: params.nextTest } : undefined);
   const next = { ...sessionData, createdAt: new Date(data.createdAt), index: data.index + 1, deadline: null, complete: data.index === 2 };
   const justification = inTime && params.justification?.trim();
   const preset = evolutionFor(data);
@@ -303,6 +314,10 @@ async function modelAnswer(db, env, caller, messages, maxTokens, temperature = 0
 }
 
 async function dialogue(db, env, caller, currentCase, question, history) {
+  if (hospitalHistoryQuestion(question, history)) {
+    const reply = focusedHistoryReply(currentCase, question, history);
+    if (reply) return { mode: 'structured', reply };
+  }
   const historyDetail = patientHistoryReply(currentCase, question, history);
   if (historyDetail && isVaccinationCardRequest(question)) return { mode: 'structured', reply: historyDetail };
   const cue = historyDetail ?? patientBackgroundReply(currentCase, question, history)
@@ -387,6 +402,7 @@ async function review(db, env, identity, resultId, body) {
   const { title, score, domains, diagnosis, reference, critical, feedback } = result;
   const basis = {
     title, score, domains, diagnosis, reference, critical: critical.slice(0, 4), decisions: facts.decisions.slice(0, 4),
+    reasoning: result.reasoning, treatment: result.treatment,
     feedback: [...feedback.filter((item) => !item.earned), ...feedback.filter((item) => item.earned)].slice(0, 12),
     scenario: facts.scenario, opening: facts.opening,
     observations: facts.observations.slice(0, 8).map((item) => ({ ...item, reply: item.reply.slice(0, 220) })),

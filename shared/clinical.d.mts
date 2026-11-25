@@ -1,3 +1,4 @@
+import type { PrescriptionKey, ReasoningKey, ReasoningNote, ReasoningResult, TreatmentOption, TreatmentPlan, TreatmentResult } from './decisions.mjs';
 export type Group = 'anamnesis' | 'exploracion' | 'paraclinicos' | 'razonamiento' | 'acciones' | 'cierre';
 export type Interaction = { id: string; group: Group; label: string; reply: string };
 export type CurricularGroup = 'A' | 'B';
@@ -5,9 +6,9 @@ export type StudyResult = { id: string; label: string; value: string; unit: stri
 export type InterviewDetail = { question: string; reply: string };
 export type VaccinationDose = { vaccine: string; dose: string; date: string };
 export type VaccinationCard = { summary: string; doses: VaccinationDose[] };
-export type CaseData = { title: string; category: string; scenario: string; opening: string; difficulty: 'Baja'|'Media'|'Alta'; status: 'draft'|'review'|'published'; interactions: Interaction[]; curricularGroups?: CurricularGroup[]; studyResults?: StudyResult[]; interview?: InterviewDetail[]; vaccinationCard?: VaccinationCard };
-export type Rubric = { diagnosis: string; reference: string; criteria: {id: string; domain: number; points: number; tip: string}[]; critical: {id: string; tip: string}[]; differentials?: string[]; differentialNote?: string };
-export type Grade = {title: string; score: number; domains: number[]; feedback: {label:string; earned:boolean; tip:string; domain?:number}[]; critical: string[]; errors?: string[]; passed:boolean; diagnosis:string; reference:string; justification?: string; caseId?: string; category?: string; curricularGroups?: CurricularGroup[]; followUp?: { chosen?: string; expected: string }; differentials?: { chosen: string[]; expected: string[]; note?: string }};
+export type CaseData = { title: string; category: string; scenario: string; opening: string; difficulty: 'Baja'|'Media'|'Alta'; status: 'draft'|'review'|'published'; interactions: Interaction[]; curricularGroups?: CurricularGroup[]; studyResults?: StudyResult[]; interview?: InterviewDetail[]; vaccinationCard?: VaccinationCard; treatmentOptions?: TreatmentOption[] };
+export type Rubric = { diagnosis: string; reference: string; criteria: {id: string; domain: number; points: number; tip: string}[]; critical: {id: string; tip: string}[]; differentials?: string[]; differentialNote?: string; reasoning?: ReasoningKey[]; prescription?: PrescriptionKey };
+export type Grade = {title: string; score: number; domains: number[]; feedback: {label:string; earned:boolean; tip:string; domain?:number}[]; critical: string[]; errors?: string[]; passed:boolean; diagnosis:string; reference:string; justification?: string; reasoning?: ReasoningResult; treatment?: TreatmentResult; caseId?: string; category?: string; curricularGroups?: CurricularGroup[]; followUp?: { chosen?: string; expected: string }; differentials?: { chosen: string[]; expected: string[]; note?: string }};
 export const STATION_MS: number;
 export const DAILY_CIRCUITS_DEFAULT: number;
 export const DAILY_CIRCUITS_MAX: number;
@@ -21,7 +22,7 @@ export function validCase(data: unknown, rubric: unknown): boolean;
 export function validStudyResults(data: unknown): data is StudyResult[];
 export function validAnswers(data: CaseData, selections: unknown): boolean;
 export function validId(id: unknown): id is string;
-export function grade(data: CaseData, rubric: Rubric, selections: string[], differentials?: string[]): Grade;
+export function grade(data: CaseData, rubric: Rubric, selections: string[], differentials?: string[], decisions?: { reasoning?: ReasoningNote[]; treatment?: TreatmentPlan; nextTest?: string }): Grade;
 export function normalizeEmail(input: string): string | null;
 export function readInvitations(source: string): string[];
 export { structured } from './dialogue.mjs';

@@ -104,6 +104,26 @@ export function GradeDetail({ result }: { result: Grade }) {
       {result.differentials.note && <p><strong>Cómo distinguirlos</strong><br/>{result.differentials.note}</p>}
     </div>}
     {result.justification && <p><strong>Tu justificación</strong><br/>{result.justification}</p>}
+    {result.reasoning && <section>
+      <h3>Fundamento de tus hipótesis</h3>
+      {result.reasoning.entries.map((entry, index) => <div key={index}>
+        <strong>{entry.diagnosis}</strong>
+        {(entry.support || entry.for) && <p>A favor · {[entry.support, entry.for].filter(Boolean).join(' · ')}</p>}
+        {(entry.counter || entry.against) && <p>En contra · {[entry.counter, entry.against].filter(Boolean).join(' · ')}</p>}
+      </div>)}
+      {result.reasoning.nextTest && <p>Estudio o hallazgo propuesto · {result.reasoning.nextTest}</p>}
+      {!!result.reasoning.checks.length && <ul className="feedback">{result.reasoning.checks.map((item) => <li key={item.label}>
+        {item.earned ? <CircleCheck size={19}/> : <CircleAlert size={19}/>}<span><b>{item.label}</b><small>Hallazgos aceptados · {item.tip}</small></span>
+      </li>)}</ul>}
+    </section>}
+    {result.treatment && <section>
+      <h3>Pauta y seguimiento</h3>
+      {(result.treatment.submitted.choice || result.treatment.checks.length > 0) && <p>Tu pauta · {result.treatment.submitted.choice || 'Sin seleccionar'}</p>}
+      {result.treatment.checks.map((item) => <p key={item.label}><strong>{item.earned ? 'Pauta correcta' : 'Pauta esperada'}</strong><br/>{item.tip}</p>)}
+      {result.treatment.explanation && <p>{result.treatment.explanation}</p>}
+      {result.treatment.submitted.monitor && <p>Tu plan de reevaluación · {result.treatment.submitted.monitor}</p>}
+      {result.treatment.source && <small>{result.treatment.source}</small>}
+    </section>}
     {result.followUp && <p><strong>Seguimiento tras la evolución</strong><br/>Tu decisión: {result.followUp.chosen || 'Sin registrar'}. Decisión esperada: {result.followUp.expected}.</p>}
     <ul className="feedback">{result.feedback.map((item, index) => <li key={index}>{item.earned ? <CircleCheck size={19}/> : <CircleAlert size={19}/>}<span><b>{item.label}</b><small>{item.tip}</small></span></li>)}</ul>
     <p><strong>Referencia</strong><br/>{result.reference}</p>

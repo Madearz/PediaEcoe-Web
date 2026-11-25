@@ -55,6 +55,15 @@ export function reviewReply(facts, question, history = []) {
   if (/critico|seguridad|riesgo de mi/.test(intent)) return result.critical.length
     ? `La rúbrica señaló estos errores críticos:\n${bullets(result.critical.slice(0, 4))}`
     : 'Este intento no registra errores críticos. Puedes revisar también las decisiones incorrectas y los criterios pendientes.';
+  if (result.treatment && /\b(?:dosis|pauta|prescripcion|volumen|mg|ml)\b/.test(intent)) {
+    const expected = result.treatment.checks[0];
+    const choice = result.treatment.submitted.choice;
+    if (expected) return [`Tu pauta: ${choice || 'sin seleccionar'}.`, `Pauta aceptada: ${expected.tip}`,
+      result.treatment.explanation].filter(Boolean).join(' ');
+  }
+  if (result.reasoning?.checks.length && /hallazgo|razonamiento|evidencia/.test(intent)) {
+    return bullets(result.reasoning.checks.slice(0, 5).map((item) => `${item.label}. ${item.earned ? 'Registrado.' : 'Pendiente.'} Aceptado: ${item.tip}.`));
+  }
   if (matchesError && !/puntaje|puntuacion|calificacion/.test(intent)) return decisionText(matchesError);
   if (/fall|error|mal\b|incorrect/.test(intent)) {
     const items = decisions.slice(0, 4).map(decisionText);

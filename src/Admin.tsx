@@ -9,6 +9,7 @@ import { call, messageOf } from './firebase';
 import { CURRICULAR_GROUPS, DAILY_CIRCUITS_DEFAULT, DAILY_CIRCUITS_MAX, GROUPS, normalizeEmail, readInvitations, validCase, validId, validStudyResults, type CaseData, type CurricularGroup, type Interaction, type Rubric, type StudyResult, type VaccinationDose } from '../shared/clinical.mjs';
 import { caseGroups } from '../shared/case-groups.mjs';
 import { formatStudyResult, MISSING_STUDY_VALUE, stationStudySamples } from '../shared/studies.mjs';
+import { validPrescriptionKey, validReasoningKey } from '../shared/decisions.mjs';
 
 const emptyCase: CaseData = { title: '', category: '', difficulty: 'Media', scenario: '', opening: '', status: 'draft', interactions: [], curricularGroups: [] };
 const emptyRubric: Rubric = { diagnosis: '', reference: '', criteria: [], critical: [] };
@@ -156,11 +157,15 @@ function CaseEditor() {
   const [remove, setRemove] = useState(false);
   const [diagnosisLabel, setDiagnosisLabel] = useState('');
   let diagnosisChoices: Interaction[] = [];
+  let reasoningFindings: Interaction[] = [];
   let primaryDiagnosis: string | undefined;
   try {
     const items: unknown = JSON.parse(structure);
     const scoring: unknown = JSON.parse(criteria);
-    if (Array.isArray(items)) diagnosisChoices = items.filter((item) => item?.group === 'razonamiento' && typeof item.label === 'string');
+    if (Array.isArray(items)) {
+      diagnosisChoices = items.filter((item) => item?.group === 'razonamiento' && typeof item.label === 'string');
+      reasoningFindings = items.filter((item) => ['anamnesis', 'exploracion', 'paraclinicos'].includes(item?.group) && typeof item.label === 'string');
+    }
     if (Array.isArray(scoring)) primaryDiagnosis = scoring.find((item) => item?.domain === 2)?.id;
   } catch { /* The JSON fields retain their own validation on save. */ }
   function addDiagnosisChoice() {
@@ -240,11 +245,20 @@ function CaseEditor() {
       try {
         current = { ...data, interactions: JSON.parse(structure) };
         scoring = { ...rubric, criteria: JSON.parse(criteria), critical: JSON.parse(critical) };
+        if (scoring.reasoning) {
+          const eligible = [scoring.criteria.find(({ domain }) => domain === 2)?.id, ...(scoring.differentials ?? [])];
+          scoring.reasoning = scoring.reasoning.filter(({ diagnosis }) => eligible.includes(diagnosis));
+          if (!scoring.reasoning.length) delete scoring.reasoning;
+        }
       } catch { throw new Error('Revisa el formato JSON de interacciones, criterios y errores críticos.'); }
       if (current.vaccinationCard && !current.vaccinationCard.summary.trim() && !current.vaccinationCard.doses.length) delete current.vaccinationCard;
       if (current.studyResults && (!validStudyResults(current.studyResults)
           || current.studyResults.some((item) => formatStudyResult(item) === MISSING_STUDY_VALUE))) {
         throw new Error('Revisa los paraclínicos. Escribe el resultado de cada estudio y, para resultados cuantitativos, el valor numérico.');
+      }
+      if (scoring.reasoning && !validReasoningKey(scoring.reasoning, current.interactions)) throw new Error('Revisa los hallazgos configurados en el razonamiento.');
+      if (current.treatmentOptions && !validPrescriptionKey(scoring.prescription, current)) {
+        throw new Error('Añade de dos a seis pautas distintas, marca al menos una correcta y registra la fuente clínica.');
       }
       if (!validCase(current, scoring)) throw new Error('Revisa que todas las opciones tengan un identificador distinto, que las decisiones tengan al menos dos opciones y que los dominios sumen 20, 20, 20, 25 y 15.');
       if (current.status === 'published' && !reviewed) throw new Error('Confirma la revisión médica para publicar esta versión.');
@@ -337,6 +351,60 @@ function CaseEditor() {
           onChange={(event) => setRubric({ ...rubric, differentialNote: event.target.value })}/></label>
       </fieldset>
       <label className="wide">Escenario<textarea required maxLength={750} value={data.scenario} onChange={(event) => setData({ ...data, scenario: event.target.value })}/></label>
+      <fieldset className="wide study-editor">
+        <legend>Evaluación del razonamiento</legend>
+        <p>Selecciona hallazgos aceptables para el diagnóstico principal y los diferenciales de la rúbrica.</p>
+        {diagnosisChoices.filter(({ id }) => id === primaryDiagnosis || rubric.differentials?.includes(id)).map(({ id, label }) => {
+          const row = rubric.reasoning?.find(({ diagnosis }) => diagnosis === id);
+          return <fieldset key={id} className="decision-form"><legend>{label}</legend>
+            {(['support', 'counter'] as const).map((kind) => <label key={kind}>{kind === 'support' ? 'A favor' : 'En contra'}
+              <select multiple size={4} value={row?.[kind] ?? []} onChange={(event) => {
+                const values = Array.from(event.currentTarget.selectedOptions, (option) => option.value);
+                const updated = { ...row, diagnosis: id };
+                if (values.length) updated[kind] = values;
+                else delete updated[kind];
+                const next = (rubric.reasoning ?? []).filter(({ diagnosis }) => diagnosis !== id);
+                if (updated.support || updated.counter) next.push(updated);
+                const scoring = { ...rubric };
+                if (next.length) scoring.reasoning = next;
+                else delete scoring.reasoning;
+                setRubric(scoring);
+              }}>{reasoningFindings.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
+            </label>)}
+          </fieldset>;
+        })}
+      </fieldset>
+      <fieldset className="wide study-editor">
+        <legend>Pautas de tratamiento de opción múltiple</legend>
+        {(data.treatmentOptions ?? []).map((row) => <div key={row.id} className="interview-editor-row">
+          <label>Opción<input required maxLength={240} value={row.label} onChange={(event) => setData({ ...data,
+            treatmentOptions: data.treatmentOptions!.map((item) => item.id === row.id ? { ...item, label: event.target.value } : item),
+          })}/></label>
+          <label className="checkbox"><input type="checkbox" checked={rubric.prescription?.accepted.includes(row.id) ?? false} onChange={(event) => {
+            const key = rubric.prescription ?? { accepted: [], source: '' };
+            setRubric({ ...rubric, prescription: { ...key, accepted: event.target.checked ? [...key.accepted, row.id] : key.accepted.filter((id) => id !== row.id) } });
+          }}/> Correcta</label>
+          <button type="button" className="button secondary" disabled={busy} onClick={() => {
+            const remaining = data.treatmentOptions!.filter(({ id }) => id !== row.id);
+            const nextData = { ...data };
+            const nextKey = { ...rubric };
+            if (remaining.length) {
+              nextData.treatmentOptions = remaining;
+              if (nextKey.prescription) nextKey.prescription = { ...nextKey.prescription, accepted: nextKey.prescription.accepted.filter((id) => id !== row.id) };
+            } else { delete nextData.treatmentOptions; delete nextKey.prescription; }
+            setData(nextData); setRubric(nextKey);
+          }}>Quitar pauta</button>
+        </div>)}
+        <button type="button" className="button secondary" disabled={busy || (data.treatmentOptions?.length ?? 0) >= 6}
+          onClick={() => setData({ ...data, treatmentOptions: [...(data.treatmentOptions ?? []), { id: 'pauta-' + crypto.randomUUID(), label: '' }] })}>
+          <Plus size={16}/> Agregar pauta</button>
+        {!!data.treatmentOptions?.length && <>
+          <label>Fuente clínica<input required maxLength={300} value={rubric.prescription?.source ?? ''} onChange={(event) =>
+            setRubric({ ...rubric, prescription: { accepted: [], ...rubric.prescription, source: event.target.value } })}/></label>
+          <label>Retroalimentación<textarea rows={2} maxLength={400} value={rubric.prescription?.explanation ?? ''} onChange={(event) =>
+            setRubric({ ...rubric, prescription: { accepted: [], source: '', ...rubric.prescription, explanation: event.target.value } })}/></label>
+        </>}
+      </fieldset>
       <label className="wide">Frase inicial del familiar<textarea required maxLength={750} value={data.opening} onChange={(event) => setData({ ...data, opening: event.target.value })}/></label>
       <fieldset className="wide study-editor">
         <legend>Detalles de la entrevista</legend>

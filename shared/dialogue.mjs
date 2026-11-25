@@ -82,9 +82,19 @@ const detailFacets = [
 const associatedQuestion = /\b(?:(?:algun(?:os)? |alguna(?:s)? )?otr[oa]s? (?:sintomas?|molestias?)|(?:que|algo) mas (?:ha (?:notado|tenido)|le pasa|le duele|le molesta)|que sintomas? (?:mas|aparte))\b/;
 const systemsQuestion = /\b(?:revision por sistemas|interrogatorio por sistemas|sintomas? (?:en|por) otros sistemas)\b/;
 const symptomQuestion = /\b(?:tuvo|dio|ha tenido|ha presentado|lo ha visto|ha notado|dijo que tiene|tiene|tenia|presenta|siente|le ha dado|le dio|le da|le cuesta|ha estado)\b/;
+const hospitalQuestion = /\b(?:hospitaliz\w*|internad\w*|internacion|internaron|interno|ingresad\w*|ingresaron|ingresos? previos?|(?:quedo|quedarse|dormido|paso (?:la noche|varios dias)) (?:en el |en un )?hospital)\b/;
+const hospitalFollowUp = /^(?:por que(?: fue| lo (?:dejaron alla|ingresaron))?|por que motivo|de que|cuando(?: fue)?|hace cuanto|cuanto tiempo(?: estuvo)?|cuantos dias(?: estuvo)?|cuantas veces)(?: exactamente)?$/;
+const hospitalFacts = /\b(?:hospitaliz\w*|hospital|internad\w*|internacion|internaron|interno|ingresad\w*|ingresaron|ingresos? previos?)\b/;
+export function hospitalHistoryQuestion(question, history = []) {
+  const text = questionText(question);
+  if (hospitalQuestion.test(text)) return true;
+  if (!hospitalFollowUp.test(text)) return false;
+  const previous = history.findLast((turn) => !socialReply(turn.question) && !hospitalFollowUp.test(questionText(turn.question)));
+  return Boolean(previous && hospitalQuestion.test(questionText(previous.question)));
+}
 const backgroundDetails = [
   [/\b(?:antecedentes? familiares?|historia familiar|en la familia|familiares?|alguien de su familia)\b/, /\b(?:familia\w*|hereditar\w*|madre|padre|mama|papa|herman\w*|abuel\w*)\b/, 'No sabría confirmarle si hay antecedentes en la familia.'],
-  [/\b(?:hospitaliz\w*|internad\w*|ingresos? previos?)\b/, /\b(?:hospitaliz\w*|internad\w*|ingresos? previos?)\b/, 'No recuerdo una hospitalización anterior que pueda contarle.'],
+  [hospitalQuestion, hospitalFacts, 'Que yo sepa, no ha tenido que quedarse internado.'],
   [/\b(?:cirug\w*|operaron|operad\w*|intervenciones quirurgicas)\b/, /\b(?:cirug\w*|operaron|operad\w*|quirurgic\w*)\b/, 'No recuerdo una operación anterior que pueda contarle.'],
   [/\b(?:como nacio|nacio antes|nacio a termino|prematur\w*|embarazo|parto|cesarea|neonatal|perinatal)\b/, /\b(?:nacio|prematur\w*|embarazo|parto|cesarea|perinatal|neonatal|gestacion|termino)\b/, 'No recuerdo esos detalles del embarazo o del nacimiento.'],
   [/\b(?:contactos?|alguien enfermo|estuvo con alguien|viajes?|ha viajado|recien viajo|exposicion)\b/, /\b(?:contact\w*|exposic\w*|viaj\w*|cerca de|escuela|colegio|enfermo|estuvo con)\b/, 'No sabría decirle con quién pudo haber estado en contacto.'],
@@ -324,7 +334,28 @@ export function focusedHistoryReply(currentCase, question, history = [], allowUn
       });
     return respond(candidate ? asSentence(candidate) : 'Por ahora, eso es lo que más me preocupa.');
   }
-  const prior = backgroundDetails.find(([pattern]) => pattern.test(text));
+  if (hospitalHistoryQuestion(question, history)) {
+    const documented = interviewFacts(currentCase).find(({ label }) => hospitalFacts.test(normalize(label)))?.reply;
+    const source = documented || topicClauses(currentCase, hospitalFacts)[0];
+    if (source && hospitalFollowUp.test(text) && !/\b(?:nunca|no lo|no la|sin ingresos)\b/.test(normalize(source))) {
+      const why = /^(?:por que|de que)/.test(text);
+      if (why) {
+        const cause = source.match(/\bpor (?!que\b)([^,;.]+?)(?=\s+(?:hace|y estuvo|y dur[oó])\b|[,;.]|$)/i)?.[1];
+        return respond(cause ? asSentence(`Fue por ${cause}`) : 'No recuerdo bien el motivo de ese ingreso.');
+      }
+      const asksLength = /^(?:cuanto tiempo|cuantos dias)/.test(text);
+      const asksCount = /^cuantas veces/.test(text);
+      const quantity = '(?:\\d+|un[oa]?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|varios|varias)';
+      const known = asksLength ? source.match(new RegExp(`(?:dur[oó]|estuvo|se qued[oó]) (?:all[ií] )?(${quantity} (?:d[ií]as?|semanas?|meses?|horas?))`, 'i'))?.[1]
+        : asksCount ? source.match(new RegExp(`\\b(${quantity} (?:vez|veces))\\b`, 'i'))?.[1]
+          : source.match(/\b(hace [^,;.]+|ayer|el a[nñ]o pasado)\b/i)?.[1];
+      return respond(known ? asSentence(known) : asksLength ? 'No recuerdo cuánto tiempo estuvo allí.'
+        : asksCount ? 'No sabría decirle cuántas veces.' : 'No recuerdo bien cuándo fue ese ingreso.');
+    }
+    if (source) return respond(asSentence(source));
+    if (allowUncertain) return respond('Que yo sepa, no ha tenido que quedarse internado.');
+  }
+  const prior = backgroundDetails.find(([pattern]) => pattern !== hospitalQuestion && pattern.test(text));
   if (prior) {
     const [, fact, fallback] = prior;
     const source = topicClauses(currentCase, fact)[0];

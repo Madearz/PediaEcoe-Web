@@ -1,3 +1,5 @@
+import { evaluateReasoning, evaluateTreatment, validPrescriptionKey, validReasoningKey, validTreatmentOptions } from './decisions.mjs';
+
 export const STATION_MS = 5 * 60 * 1000;
 export const DAILY_CIRCUITS_DEFAULT = 5;
 export const DAILY_CIRCUITS_MAX = 50;
@@ -33,6 +35,8 @@ export function validCase(data, rubric) {
       || !['draft', 'review', 'published'].includes(data.status)
       || (data.curricularGroups !== undefined && !validCurricularGroups(data.curricularGroups))
       || (data.studyResults !== undefined && !validStudyResults(data.studyResults))
+      || (data.treatmentOptions !== undefined && !validTreatmentOptions(data.treatmentOptions))
+      || (data.treatmentOptions !== undefined ? !validPrescriptionKey(rubric.prescription, data) : rubric.prescription !== undefined)
       || (data.interview !== undefined && (!Array.isArray(data.interview) || data.interview.length > 24
         || !data.interview.every((row) => row && short(row.question, 160) && short(row.reply, 400))))
       || (data.vaccinationCard !== undefined && !validVaccinationCard(data.vaccinationCard))
@@ -49,6 +53,7 @@ export function validCase(data, rubric) {
     if (SINGLE.includes(interaction.group) && interaction.reply !== '') return false;
     options.set(interaction.id, interaction);
   }
+  if (rubric.reasoning !== undefined && !validReasoningKey(rubric.reasoning, data.interactions)) return false;
   const points = [0, 0, 0, 0, 0];
   const used = new Set();
   for (const criterion of rubric.criteria) {
@@ -87,7 +92,7 @@ export function validAnswers(data, selections) {
   return true;
 }
 
-export function grade(data, rubric, selections, differentials = []) {
+export function grade(data, rubric, selections, differentials = [], { reasoning: notes, treatment: plan, nextTest } = {}) {
   const selected = new Set(selections);
   const domains = [0, 0, 0, 0, 0];
   const feedback = rubric.criteria.map((item) => {
@@ -104,9 +109,16 @@ export function grade(data, rubric, selections, differentials = []) {
     const matched = differentials.filter((id) => expectedDifferentials.includes(id)).length;
     domains[2] = (domains[2] > 0 ? 14 : 0) + 6 * matched / expectedDifferentials.length;
   }
+  const reasoning = evaluateReasoning(data, rubric.reasoning, notes, nextTest);
+  const treatment = evaluateTreatment(data, rubric.prescription, plan);
+  if (reasoning.checks.length) domains[2] = Math.round(domains[2] * 0.8 + 4 * reasoning.checks.filter(({ earned }) => earned).length / reasoning.checks.length);
+  if (treatment?.checks.length) domains[3] = (domains[3] > 0 ? 15 : 0)
+    + Math.round(10 * treatment.checks.filter(({ earned }) => earned).length / treatment.checks.length);
   const score = domains.reduce((total, value) => total + value, 0);
   return { title: data.title, score, domains, feedback, critical, errors, passed: score >= 70 && critical.length === 0,
     diagnosis: rubric.diagnosis, reference: rubric.reference,
+    ...(reasoning.entries.length || reasoning.checks.length || reasoning.nextTest ? { reasoning } : {}),
+    ...(treatment ? { treatment } : {}),
     ...(differentials.length || expectedDifferentials.length ? {
       differentials: { chosen: names(differentials), expected: names(expectedDifferentials),
         ...(rubric.differentialNote ? { note: rubric.differentialNote } : {}) },
